@@ -1,0 +1,10 @@
+---
+- name: Retrieve 1Password items
+  hosts: localhost
+  gather_facts: no
+  environment:
+    OP_CONNECT_HOST: "{{ connect_host }}/v1/vaults"
+  collections:
+    - onepassword.connect
+  roles:
+    - 1Password
