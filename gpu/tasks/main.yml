@@ -8,3 +8,6 @@
 
 - name: Install the container toolkit
   ansible.builtin.import_tasks: nvidia_ctoolkit.yml
+
+- name: Apply the nvidia runtime and nvidia-device-plugin
+  ansible.builtin.import_tasks: nvdp.yml

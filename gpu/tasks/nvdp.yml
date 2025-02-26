@@ -1,0 +1,82 @@
+---
+- name: Create NVIDIA RuntimeClass manifest
+  ansible.builtin.copy:
+    src: "nvidia-runtime.yml"
+    dest: "{{ home_dir }}/nvidia-runtime-class.yml"
+  register: runtime_class_file
+
+- name: Apply NVIDIA RuntimeClass
+  kubernetes.core.k8s:
+    state: present
+    src: "{{ home_dir }}/nvidia-runtime-class.yml"
+
+- name: Label GPU nodes for NVIDIA support
+  kubernetes.core.k8s:
+    state: patched
+    kind: Node
+    name: "{{ item }}"
+    definition:
+      metadata:
+        labels:
+          allow-nvdp: "true"
+  loop: "{{ gpu_nodes }}"
+
+- name: Add NVIDIA Device Plugin Helm repository
+  kubernetes.core.helm_repository:
+    name: nvdp
+    repo_url: https://nvidia.github.io/k8s-device-plugin
+
+- name: Update Helm repositories
+  command: helm repo update
+  changed_when: true
+
+- name: Check for required GPU node labels
+  ansible.builtin.shell: >
+    kubectl get nodes -o json | jq -r '.items[] |
+    {
+      "name": .metadata.name,
+      "has_allow_nvdp": (.metadata.labels."allow-nvdp" == "true"),
+      "has_gpu_present": (.metadata.labels."nvidia.com/gpu.present" == "true")
+    } | tostring'
+  register: node_labels_check
+  changed_when: false
+
+- name: Parse node label results
+  ansible.builtin.set_fact:
+    parsed_node_labels: "{{ node_labels_check.stdout_lines | map('from_json') | list }}"
+
+- name: Display nodes missing required labels
+  ansible.builtin.debug:
+    msg: "Node {{ item.name }} missing labels: {{
+      (item.has_allow_nvdp == false) | ternary('allow-nvdp=true ', '') }}{{
+      (item.has_gpu_present == false) | ternary('nvidia.com/gpu.present=true', '') }}"
+  loop: "{{ parsed_node_labels }}"
+  when: not (item.has_allow_nvdp and item.has_gpu_present)
+
+- name: Fail if required labels are missing
+  ansible.builtin.fail:
+    msg: "Node {{ item.name }} is missing required labels: {{
+      (item.has_allow_nvdp == false) | ternary('allow-nvdp=true ', '') }}{{
+      (item.has_gpu_present == false) | ternary('nvidia.com/gpu.present=true', '') }}"
+  loop: "{{ parsed_node_labels }}"
+  when: not (item.has_allow_nvdp and item.has_gpu_present)
+
+- name: Check if any node has all required labels
+  ansible.builtin.set_fact:
+    labels_ready: "{{ labels_ready | default(false) or (item.has_allow_nvdp and item.has_gpu_present) }}"
+  loop: "{{ parsed_node_labels }}"
+
+- name: Install NVIDIA Device Plugin
+  kubernetes.core.helm:
+    name: nvdp
+    chart_ref: nvdp/nvidia-device-plugin
+    release_namespace: nvidia-device-plugin
+    create_namespace: true
+    chart_version: 0.16.2
+    values:
+      runtimeClassName: nvidia
+      deviceListStrategy: volume-mounts
+      nodeSelector:
+        allow-nvdp: "true"
+    state: present
+  when: labels_ready | bool

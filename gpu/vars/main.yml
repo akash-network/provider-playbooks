@@ -1,3 +1,6 @@
 ---
 # vars file for gpu
+home_dir: "/home/ubuntu"
 nvidia_version: 565.57.01
+gpu_nodes:
+- node1
