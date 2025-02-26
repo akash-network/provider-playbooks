@@ -1,0 +1,55 @@
+---
+- name: Add NVIDIA GPG key
+  ansible.builtin.apt_key:
+    url: https://nvidia.github.io/libnvidia-container/gpgkey
+    state: present
+
+- name: Add NVIDIA repository
+  ansible.builtin.get_url:
+    url: https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list
+    dest: /etc/apt/sources.list.d/libnvidia-container.list
+    mode: '0644'
+
+- name: Install NVIDIA Container Toolkit and Runtime
+  ansible.builtin.apt:
+    name: 
+      - nvidia-container-toolkit
+      - nvidia-container-runtime
+    state: present
+    update_cache: yes
+
+- name: Check if NVIDIA runtime configuration file exists
+  ansible.builtin.stat:
+    path: /etc/nvidia-container-runtime/config.toml
+  register: nvidia_config_file
+
+- name: Enable NVIDIA visible devices as volume mounts
+  ansible.builtin.lineinfile:
+    path: /etc/nvidia-container-runtime/config.toml
+    regexp: '#accept-nvidia-visible-devices-as-volume-mounts = false'
+    line: 'accept-nvidia-visible-devices-as-volume-mounts = true'
+    backrefs: yes
+  when: nvidia_config_file.stat.exists
+
+- name: Disable NVIDIA visible devices envvar when unprivileged
+  ansible.builtin.lineinfile:
+    path: /etc/nvidia-container-runtime/config.toml
+    regexp: '#accept-nvidia-visible-devices-envvar-when-unprivileged = true'
+    line: 'accept-nvidia-visible-devices-envvar-when-unprivileged = false'
+    backrefs: yes
+  when: nvidia_config_file.stat.exists
+
+- name: Create configuration to disable automatic updates
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    content: |
+      APT::Periodic::Update-Package-Lists "0";
+      APT::Periodic::Unattended-Upgrade "0";  
+
+- name: Remove unattended-upgrades package
+  ansible.builtin.apt:
+    name: unattended-upgrades
+    state: absent
+    purge: yes
+  notify:
+    - Disable unattended-upgrades service

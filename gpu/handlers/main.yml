@@ -1,0 +1,13 @@
+---
+# handlers file for gpu
+- name: Configure NVIDIA Fabric Manager
+  ansible.builtin.systemd:
+    name: nvidia-fabricmanager
+    state: started
+    enabled: yes
+
+- name: Disable unattended-upgrades service
+  ansible.builtin.systemd:
+    name: unattended-upgrades
+    state: stopped
+    masked: yes

@@ -1,0 +1,99 @@
+---
+- name: Split NVIDIA version into components
+  ansible.builtin.set_fact:
+    nvidia_base_version: "{{ nvidia_version | regex_replace('^([0-9]+)\\.([0-9]+)\\.([0-9]+)$', '\\1.\\2') }}"
+    nvidia_major_version: "{{ nvidia_version | regex_replace('^([0-9]+)\\.([0-9]+)\\.([0-9]+)$', '\\1') }}"
+    nvidia_minor_version: "{{ nvidia_version | regex_replace('^([0-9]+)\\.([0-9]+)\\.([0-9]+)$', '\\2') }}"
+    nvidia_patch_version: "{{ nvidia_version | regex_replace('^([0-9]+)\\.([0-9]+)\\.([0-9]+)$', '\\3') }}"
+
+- name: Check if nvidia-smi is already done
+  ansible.builtin.shell: nvidia-smi --query-gpu=driver_version --format=csv,noheader | head -n1
+  register: nvidia_driver_check
+  changed_when: false
+
+- name: Set fact for current driver version
+  ansible.builtin.set_fact:
+    current_driver_version: "{{ nvidia_driver_check.stdout | default('') }}"
+
+- name: Fail if driver is already at the required version
+  ansible.builtin.fail:
+    msg: "NVIDIA driver is already at version {{ current_driver_version }}. No action required."
+  when: current_driver_version == nvidia_version
+
+- name: Download NVIDIA GPG key
+  ansible.builtin.get_url:
+    url: https://developer.download.nvidia.com/compute/cuda/repos/ubuntu{{ ubuntu_version }}/x86_64/3bf863cc.pub
+    dest: /tmp/3bf863cc.pub
+    mode: '0644'
+
+- name: Add NVIDIA GPG key
+  ansible.builtin.apt_key:
+    file: /tmp/3bf863cc.pub
+    state: present
+
+- name: Add NVIDIA repository
+  ansible.builtin.apt_repository:
+    repo: "deb https://developer.download.nvidia.com/compute/cuda/repos/ubuntu{{ ubuntu_version }}/x86_64/ /"
+    filename: nvidia-official-repo
+    state: present
+
+- name: Update apt cache
+  ansible.builtin.apt:
+    update_cache: yes
+
+- name: Install NVIDIA driver and autoremove unused packages
+  ansible.builtin.apt:
+    name: nvidia-driver-{{ nvidia_major_version }}
+    state: present
+    dpkg_options: 'force-confdef,force-confold'
+    autoremove: yes
+    force_apt_get: yes
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+
+- name: Unload all NVIDIA modules in reverse order
+  ansible.builtin.shell: |
+    set +e
+    if lsmod | grep -q gdrdrv; then rmmod gdrdrv; fi
+    if lsmod | grep -q nvidia_uvm; then rmmod nvidia_uvm; fi
+    if lsmod | grep -q nvidia_drm; then rmmod nvidia_drm; fi
+    if lsmod | grep -q nvidia_modeset; then rmmod nvidia_modeset; fi
+    if lsmod | grep -q nvidia; then rmmod nvidia; fi
+  args:
+    executable: /bin/bash
+      
+- name: Sleep for a moment
+  ansible.builtin.pause:
+    seconds: 5
+      
+- name: Load dependent NVIDIA modules one by one
+  ansible.builtin.shell: "modprobe {{ item }}"
+  loop:
+    - nvidia
+    - nvidia_modeset
+    - nvidia_drm
+    - nvidia_uvm
+
+- name: Check if NVIDIA GPUs are PCIe
+  ansible.builtin.shell: nvidia-smi -L
+  register: nvidia_smi_output
+  changed_when: false
+
+- name: Fail if the Nvidia GPUs are not initialized
+  ansible.builtin.set_fact: 
+    has_passed: "{{ 'Failed to initialize' in nvidia_smi_output.stdout }}"
+
+- name: Set fact for PCIe GPUs
+  ansible.builtin.set_fact:
+    has_pcie: "{{ 'PCIe' in nvidia_smi_output.stdout }}"  
+
+- name: Install and configure NVIDIA Fabric Manager
+  ansible.builtin.apt:
+    name: nvidia-fabricmanager-{{ nvidia_version }}
+    state: present
+    update_cache: yes
+  when: 
+  - has_pcie is none
+  - has_passed
+  notify:
+    - Configure NVIDIA Fabric Manager

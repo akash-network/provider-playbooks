@@ -1,0 +1,3 @@
+---
+# vars file for gpu
+nvidia_version: 565.57.01
