@@ -1,34 +1,34 @@
 ---
-# Check if required 1Password Connect variables are defined
-- name: Check 1Password required variables
+# Check if required op Connect variables are defined
+- name: Check op required variables
   block:
-    - name: Collect missing 1Password connection variables
+    - name: Collect missing op connection variables
       set_fact:
         missing_1p_vars: "{{ missing_1p_vars | default([]) + [item.name] }}"
       when: (item.var is not defined) or (item.var | length == 0)
       loop:
         - { name: "op_token", var: "{{ op_token | default('') }}" }
     
-    - name: Fail with helpful message if 1Password variables are missing
+    - name: Fail with helpful message if op variables are missing
       fail:
         msg: |
-          The following 1Password Connect variables are not defined:
+          The following op Connect variables are not defined:
           {% for var in missing_1p_vars %}
           - {{ var }}
           {% endfor %}
           
           Please either:
           1. Define these variables manually in your inventory or vars file, or
-          2. Run the playbook with the `connect` tag to set up 1Password Connect:
+          2. Run the playbook with the `connect` tag to set up op Connect:
              ansible-playbook playbook.yml --tags connect
       when: missing_1p_vars is defined and missing_1p_vars | length > 0
       
-    - name: Success message if all 1Password variables are defined
+    - name: Success message if all op variables are defined
       debug:
-        msg: "All required 1Password Connect variables are properly defined."
+        msg: "All required op Connect variables are properly defined."
       when: missing_1p_vars is not defined or missing_1p_vars | length == 0
 
-- name: Test connection to 1Password Connect server
+- name: Test connection to op Connect server
   ansible.builtin.uri:
     url: "{{ connect_host }}/heartbeat"
     method: GET
@@ -47,7 +47,7 @@
     that:
       - health_check.status == 200
       - not health_check.failed
-    success_msg: "1Password Connect server is healthy and responding"
+    success_msg: "OP Connect server is healthy and responding"
 
 - name: Display variables
   ansible.builtin.debug:

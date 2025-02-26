@@ -1,5 +1,5 @@
 ---
-- name: Retrieve 1Password items
+- name: Retrieve op items
   hosts: localhost
   gather_facts: no
   environment:
@@ -7,4 +7,4 @@
   collections:
     - onepassword.connect
   roles:
-    - 1Password
+    - op

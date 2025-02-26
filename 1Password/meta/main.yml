@@ -1,6 +1,0 @@
-galaxy_info:
-  author: Vignesh V
-  description: Ansible role to setup 1Password connect server to fetch the keys from the 1Password Vault.
-  company: Overclock
-  license: Apache-2.0
-  min_ansible_version: 2.15

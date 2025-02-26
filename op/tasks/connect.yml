@@ -1,4 +1,4 @@
-- name: Sign in to 1P account
+- name: Sign in to op account
   ansible.builtin.shell: op signin --account {{ opconnect_account_name }}
 
 - name: Check if connect server exists
@@ -14,7 +14,7 @@
     msg: "Connect server already exists"
   when: server_matches | length != 0
 
-- name: Create 1Password connect server
+- name: Create op connect server
   ansible.builtin.shell: op connect server create {{ opconnect_server_name }} --vaults {{ vault_name }} -f
   register: create_server
   when: server_matches | length == 0
@@ -37,12 +37,12 @@
     src: files/docker-compose.yaml
     dest: "{{ playbook_dir }}"
 
-- name: Run 1Password Connect in detached mode
+- name: Run op Connect in detached mode
   ansible.builtin.shell: docker-compose down && docker-compose -f {{ playbook_dir }}/docker-compose.yaml up -d
   args:
     chdir: "{{ playbook_dir }}"
 
-- name: Test connection to 1Password Connect server
+- name: Test connection to op Connect server
   ansible.builtin.uri:
     url: "{{ connect_host }}/heartbeat"
     method: GET
