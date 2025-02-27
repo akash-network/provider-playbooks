@@ -42,6 +42,20 @@ No config file found; using defaults
 
 PLAY [Retrieve op items] *******************************************************************************************************************************
 
+TASK [op : Check for required binaries] ****************************************************************************************
+ok: [localhost] => (item=op) => {"ansible_loop_var": "item", "changed": false, "cmd": "command -v op", "delta": "0:00:00.004035", "end": "2025-02-27 13:02:44.982940", "item": "op", "msg": "", "rc": 0, "start": "2025-02-27 13:02:44.978905", "stderr": "", "stderr_lines": [], "stdout": "/opt/homebrew/bin/op", "stdout_lines": ["/opt/homebrew/bin/op"]}
+ok: [localhost] => (item=docker) => {"ansible_loop_var": "item", "changed": false, "cmd": "command -v docker", "delta": "0:00:00.003954", "end": "2025-02-27 13:02:45.130710", "item": "docker", "msg": "", "rc": 0, "start": "2025-02-27 13:02:45.126756", "stderr": "", "stderr_lines": [], "stdout": "/usr/local/bin/docker", "stdout_lines": ["/usr/local/bin/docker"]}
+ok: [localhost] => (item=docker compose) => {"ansible_loop_var": "item", "changed": false, "cmd": "command -v docker compose", "delta": "0:00:00.003656", "end": "2025-02-27 13:02:45.277346", "item": "docker compose", "msg": "", "rc": 0, "start": "2025-02-27 13:02:45.273690", "stderr": "", "stderr_lines": [], "stdout": "/usr/local/bin/docker", "stdout_lines": ["/usr/local/bin/docker"]}
+
+TASK [op : Set facts about missing binaries] ***********************************************************************************
+ok: [localhost] => {"ansible_facts": {"missing_binaries": []}, "changed": false}
+
+TASK [op : Display missing binaries] *******************************************************************************************
+skipping: [localhost] => {"false_condition": "missing_binaries | length > 0"}
+
+TASK [op : Conditional failure based on missing binaries] **********************************************************************
+skipping: [localhost] => {"changed": false, "false_condition": "missing_binaries | length > 0", "skip_reason": "Conditional result was False"}
+
 TASK [op : Sign in to op account] **********************************************************************************************************************
 changed: [localhost] => {"changed": true, "cmd": "op signin --account my.1password.com", "delta": "0:00:00.431875", "end": "2025-02-26 00:03:13.199228", "msg": "", "rc": 0, "start": "2025-02-26 00:03:12.767353", "stderr": "", "stderr_lines": [], "stdout": "", "stdout_lines": []}
 

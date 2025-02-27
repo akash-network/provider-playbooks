@@ -1,7 +1,6 @@
 ---
 - name: Retrieve op items
   hosts: localhost
-  gather_facts: no
   environment:
     OP_CONNECT_HOST: "{{ connect_host }}/v1/vaults"
   collections:

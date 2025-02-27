@@ -1,0 +1,25 @@
+---
+- name: Check for required binaries
+  ansible.builtin.shell: "command -v {{ item }}"
+  register: binary_check
+  loop:
+    - op
+    - docker
+    - "{{ 'docker-compose' if ansible_distribution == 'Ubuntu' else 'docker compose' }}"
+  ignore_errors: yes
+  changed_when: false
+  check_mode: no
+
+- name: Set facts about missing binaries
+  ansible.builtin.set_fact:
+    missing_binaries: "{{ binary_check.results | selectattr('rc', 'ne', 0) | map(attribute='item') | list }}"
+
+- name: Display missing binaries
+  ansible.builtin.debug:
+    msg: "Missing required binaries: {{ missing_binaries | join(', ') }}"
+  when: missing_binaries | length > 0
+
+- name: Conditional failure based on missing binaries
+  ansible.builtin.fail:
+    msg: "Required binaries: {{ missing_binaries | join(', ') }} are missing on {{ ansible_distribution }}. Please install them before continuing."
+  when: missing_binaries | length > 0
