@@ -1,7 +1,7 @@
 ---
 # vars file for 1P
-provider_name: ""            ## Enter your provider name here
-vault_name: "Providerss"
+provider_name: "h123.24t5.net"
+vault_name: "Providers"
 connect_host: "http://localhost:8080"
 
 provider_b64_key_field: b64-key
