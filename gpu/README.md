@@ -20,9 +20,13 @@ ansible-playbook playbooks.yaml -e 'host=target' -i inv -v
 ```
 
 ### Configuration Variables
-| Variable                 | Description                                        | Required | Default                |
-|--------------------------|----------------------------------------------------|----------|------------------------|
-| `nvidia_version`         | Nvidia Driver Version                              | Yes      | 565.57.01              |
+| Variable                 | Description                                                      | Required | Default                |
+|--------------------------|------------------------------------------------------------------|----------|------------------------|
+| `home_dir`               | usually /home/ubuntu, can be any directory - used to store files.| Yes      | /home/ubuntu           |
+| `nvidia_version`         | Nvidia Driver Version                                            | Yes      | 565.57.01              |
+| `gpu_nodes`              | list of nodes- used to apply the gpu labels                      | Yes      | [node1]                |
+
+
 
 ### Examples
 #### Deployment
