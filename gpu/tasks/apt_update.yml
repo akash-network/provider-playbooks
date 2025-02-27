@@ -1,0 +1,21 @@
+---
+- name: Get OS Version
+  ansible.builtin.set_fact:
+    ubuntu_version: "{{ ansible_distribution_version | replace('.', '') }}"
+
+- name: Update the apt package index
+  ansible.builtin.apt:
+    update_cache: yes
+
+- name: Perform dist-upgrade with DEBIAN_FRONTEND noninteractive
+  ansible.builtin.apt:
+    upgrade: dist
+    force_apt_get: yes
+    dpkg_options: 'force-confdef,force-confold'
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+
+- name: Remove unused packages
+  ansible.builtin.apt:
+    autoremove: yes
+    force_apt_get: yes

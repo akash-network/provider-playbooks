@@ -7,3 +7,11 @@
     - onepassword.connect
   roles:
     - op
+---
+- name: GPU Playbook
+  hosts: "{{ host }}"
+  become: true
+  become_user: root
+  serial: "{{ serial_hosts | default(1) }}"
+  roles:
+    - gpu
