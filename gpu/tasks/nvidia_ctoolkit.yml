@@ -1,7 +1,7 @@
 ---
 - name: Install NVIDIA Container Toolkit and Runtime
   ansible.builtin.apt:
-    name: 
+    name:
       - nvidia-container-toolkit
       - nvidia-container-runtime
     state: present
@@ -12,23 +12,16 @@
     path: "{{ cruntime_toml_path }}"
   register: nvidia_config_file
 
-- name: Enable NVIDIA visible devices as volume mounts
-  ansible.builtin.lineinfile:
-    path: "{{ cruntime_toml_path }}"
-    regexp: '#accept-nvidia-visible-devices-as-volume-mounts = false'
-    line: 'accept-nvidia-visible-devices-as-volume-mounts = true'
-    backrefs: yes
-  when: 
-  - nvidia_config_file.stat.exists
+- name: Take the backup of the existing file
+  ansible.builtin.copy:
+    src: "{{ cruntime_toml_path }}"
+    dest: "{{ cruntime_toml_path }}_bk"
+    remote_src: yes
 
-- name: Disable NVIDIA visible devices envvar when unprivileged
-  ansible.builtin.lineinfile:
-    path: "{{ cruntime_toml_path }}"
-    regexp: '#accept-nvidia-visible-devices-envvar-when-unprivileged = true'
-    line: 'accept-nvidia-visible-devices-envvar-when-unprivileged = false'
-    backrefs: yes
-  when: 
-  - nvidia_config_file.stat.exists
+- name: Copy the container runtime config file
+  ansible.builtin.copy:
+    src: container-runtime-config.toml
+    dest: "{{ cruntime_toml_path }}"
 
 - name: Check if nvidia parameters are present in config.toml
   ansible.builtin.shell: |

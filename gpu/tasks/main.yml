@@ -1,7 +1,7 @@
 ---
 # tasks file for gpu
 - name:  apt update
-  ansible.builtin.import_tasks: apt_update.yml 
+  ansible.builtin.import_tasks: apt_update.yml
  
 - name: nvidia update
   ansible.builtin.import_tasks: nvidia_update.yml
