@@ -1,6 +1,6 @@
 ---
 # vars file for gpu
-home_dir: "/home/ubuntu"
+home_dir: "/root/ansible.tmp/"
 nvidia_version: 565.57.01
 gpu_nodes:
 - node1

@@ -5,6 +5,9 @@
     name: nvidia-fabricmanager
     state: started
     enabled: yes
+  when:
+  - has_pcie is none
+  - has_passed
 
 - name: Disable unattended-upgrades service
   ansible.builtin.systemd:
