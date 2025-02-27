@@ -9,36 +9,48 @@
 
 - name: Check if NVIDIA runtime configuration file exists
   ansible.builtin.stat:
-    path: /etc/nvidia-container-runtime/config.toml
+    path: "{{ cruntime_toml_path }}"
   register: nvidia_config_file
 
 - name: Enable NVIDIA visible devices as volume mounts
   ansible.builtin.lineinfile:
-    path: /etc/nvidia-container-runtime/config.toml
+    path: "{{ cruntime_toml_path }}"
     regexp: '#accept-nvidia-visible-devices-as-volume-mounts = false'
     line: 'accept-nvidia-visible-devices-as-volume-mounts = true'
     backrefs: yes
-  when: nvidia_config_file.stat.exists
+  when: 
+  - nvidia_config_file.stat.exists
 
 - name: Disable NVIDIA visible devices envvar when unprivileged
   ansible.builtin.lineinfile:
-    path: /etc/nvidia-container-runtime/config.toml
+    path: "{{ cruntime_toml_path }}"
     regexp: '#accept-nvidia-visible-devices-envvar-when-unprivileged = true'
     line: 'accept-nvidia-visible-devices-envvar-when-unprivileged = false'
     backrefs: yes
-  when: nvidia_config_file.stat.exists
+  when: 
+  - nvidia_config_file.stat.exists
 
-- name: Create configuration to disable automatic updates
-  ansible.builtin.copy:
-    dest: /etc/apt/apt.conf.d/20auto-upgrades
-    content: |
-      APT::Periodic::Update-Package-Lists "0";
-      APT::Periodic::Unattended-Upgrade "0";  
+- name: Check if nvidia parameters are present in config.toml
+  ansible.builtin.shell: |
+    result1=$(grep -E "^accept-nvidia-visible-devices-as-volume-mounts = true" {{ cruntime_toml_path }} > /dev/null; echo $?)
+    result2=$(grep -E "^accept-nvidia-visible-devices-envvar-when-unprivileged = false" {{ cruntime_toml_path }} > /dev/null; echo $?)
+    echo "{\"volume_param\": $result1, \"envvar_param\": $result2}"
+  register: nvidia_params_check
+  changed_when: false
 
-- name: Remove unattended-upgrades package
-  ansible.builtin.apt:
-    name: unattended-upgrades
-    state: absent
-    purge: yes
-  notify:
-    - Disable unattended-upgrades service
+- name: Set facts about nvidia parameters
+  ansible.builtin.set_fact:
+    nvidia_volume_param_present: "{{ (nvidia_params_check.stdout | from_json).volume_param == 0 }}"
+    nvidia_envvar_param_present: "{{ (nvidia_params_check.stdout | from_json).envvar_param == 0 }}"
+
+- name: Fail if nvidia parameters are missing
+  ansible.builtin.fail:
+    msg: >
+      Missing required NVIDIA parameters in {{ cruntime_toml_path }}:
+      {% if not nvidia_volume_param_present %}
+      - accept-nvidia-visible-devices-as-volume-mounts = true
+      {% endif %}
+      {% if not nvidia_envvar_param_present %}
+      - accept-nvidia-visible-devices-envvar-when-unprivileged = false
+      {% endif %}
+  when: not (nvidia_volume_param_present and nvidia_envvar_param_present)

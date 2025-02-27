@@ -65,11 +65,11 @@
 - name: Unload all NVIDIA modules in reverse order
   ansible.builtin.shell: |
     set +e
-    if lsmod | grep -q gdrdrv; then rmmod gdrdrv; fi
-    if lsmod | grep -q nvidia_uvm; then rmmod nvidia_uvm; fi
-    if lsmod | grep -q nvidia_drm; then rmmod nvidia_drm; fi
-    if lsmod | grep -q nvidia_modeset; then rmmod nvidia_modeset; fi
-    if lsmod | grep -q nvidia; then rmmod nvidia; fi
+    if lsmod | grep -q gdrdrv; then rmmod -f gdrdrv; fi
+    if lsmod | grep -q nvidia_uvm; then rmmod -f nvidia_uvm; fi
+    if lsmod | grep -q nvidia_drm; then rmmod -f nvidia_drm; fi
+    if lsmod | grep -q nvidia_modeset; then rmmod -f nvidia_modeset; fi
+    if lsmod | grep -q nvidia; then rmmod -f nvidia; fi
   args:
     executable: /bin/bash
       
@@ -84,6 +84,7 @@
     - nvidia_modeset
     - nvidia_drm
     - nvidia_uvm
+    - gdrdrv
 
 - name: Check if NVIDIA GPUs are PCIe
   ansible.builtin.shell: nvidia-smi -L

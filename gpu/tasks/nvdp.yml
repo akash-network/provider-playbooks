@@ -1,14 +1,20 @@
 ---
+- name: Create installation directory
+  ansible.builtin.file:
+    path: "{{ install_dir }}"
+    state: directory
+    mode: '0755'
+
 - name: Create NVIDIA RuntimeClass manifest
   ansible.builtin.copy:
     src: "nvidia-runtime.yml"
-    dest: "{{ home_dir }}/nvidia-runtime-class.yml"
+    dest: "{{ install_dir }}/nvidia-runtime-class.yml"
   register: runtime_class_file
 
 - name: Apply NVIDIA RuntimeClass
   kubernetes.core.k8s:
     state: present
-    src: "{{ home_dir }}/nvidia-runtime-class.yml"
+    src: "{{ install_dir }}/nvidia-runtime-class.yml"
 
 - name: Label GPU nodes for NVIDIA support
   kubernetes.core.k8s:
