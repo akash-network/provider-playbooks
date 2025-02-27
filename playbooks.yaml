@@ -1,0 +1,9 @@
+---
+- name: Retrieve op items
+  hosts: localhost
+  environment:
+    OP_CONNECT_HOST: "{{ connect_host }}/v1/vaults"
+  collections:
+    - onepassword.connect
+  roles:
+    - op
