@@ -17,7 +17,7 @@
 
 - name: Delete Tailscale State file
   ansible.builtin.file:
-    path: "{{ ansible_env.HOME + '/.local/state' }}/"
+    path: "{{ ansible_env.HOME + '/' + tailscale_statefile_name + '/state' }}"
     state: absent
 
 - name: Stop Tailscale Service
@@ -49,10 +49,4 @@
   become: true
   ansible.builtin.file:
     path: "{{ tailscale_apt_keyring_path }}"
-    state: absent
-
-- name: Remove Dependencies for Tailscale
-  ansible.builtin.apt:
-    name: "{{ tailscale_apt_dependencies }}"
-    cache_valid_time: 3600
     state: absent
