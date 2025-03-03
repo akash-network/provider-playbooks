@@ -1,0 +1,21 @@
+---
+# tasks file for tailscale
+- name: Setup dependencies for Tailscale
+  ansible.builtin.import_tasks: prereqs.yml
+  tags:
+  - install
+
+- name: Install Tailscale
+  ansible.builtin.import_tasks: install.yml
+  tags:
+  - install
+
+- name: Uninstall Tailscale
+  ansible.builtin.import_tasks: uninstall.yml
+  tags:
+  - uninstall
+
+- name: Output node details
+  ansible.builtin.import_tasks: output.yml
+  tags:
+  - install
