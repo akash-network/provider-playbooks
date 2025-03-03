@@ -1,0 +1,151 @@
+---
+- name: Add Tailscale Signing Key
+  ansible.builtin.get_url:
+    url: "{{ tailscale_apt_signkey }}"
+    dest: "{{ tailscale_apt_keyring_path }}"
+    mode: '0644'
+
+- name: Add Tailscale Repository
+  ansible.builtin.apt_repository:
+    repo: "{{ tailscale_apt_repo }}"
+    filename: "tailscale"
+    state: present
+
+- name: Install Tailscale
+  ansible.builtin.apt:
+    name: "{{ tailscale_package }}"
+    cache_valid_time: 3600
+    state: latest
+
+- name: Remove legacy state folder
+  ansible.builtin.file:
+    path: "{{ ansible_env.HOME }}/{{ tailscale_statefile_name }}"
+    state: absent
+
+- name: Determine state folder
+  ansible.builtin.set_fact:
+    tailscale_state_folder: "{{ ansible_env.HOME + '/' + tailscale_statefile_name + '/state' }}"
+
+- name: Set state folder
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ ansible_user_uid }}"
+    group: "{{ ansible_user_gid }}"
+    mode: '0700'
+  loop:
+    - "{{ tailscale_state_folder }}"
+
+- name: Enable Service
+  become: true
+  ansible.builtin.service:
+    name: "{{ tailscale_service }}"
+    state: started
+    enabled: true
+
+- name: Fetch Tailscale status
+  ansible.builtin.command: tailscale status --json
+  changed_when: false
+  register: tailscale_status
+
+- name: Parse status JSON
+  vars:
+    tailscale_status_parsed: "{{ tailscale_status.stdout | from_json }}"
+  ansible.builtin.set_fact:
+    tailscale_is_online: "{{  tailscale_status_parsed.Self.Online }}"
+    tailscale_version: "{{  tailscale_status_parsed.Version }}"
+
+- name: Tailscale version and online status
+  ansible.builtin.debug:
+    msg: "Ver: {{ tailscale_version }} Online: {{ tailscale_is_online }}"
+
+- name: Prepend 'tag:' to each item in the list
+  ansible.builtin.set_fact:
+    tailscale_prepared_tags: "{{ tailscale_tags | map('regex_replace', '^', 'tag:') | list }}"
+
+# OAuth key starts with 'tskey-client-', auth key starts with 'tskey-auth-', with headscale it can be 'unused'
+- name: Build `tailscale up` arguments strings
+  ansible.builtin.set_fact:
+    tailscale_authkey_type: >-
+      {# Check if the key is an OAuth key #}
+      {% if tailscale_authkey.startswith('tskey-client-') %}
+      OAuth Client Secret
+      {% elif tailscale_authkey.startswith('tskey-auth-') %}
+      API Token
+      {% else %}
+      Unknown token format
+      {% endif %}
+    tailscale_authkey_string: >-
+      {# Check if the key is an OAuth key #}
+      {% if tailscale_authkey.startswith('tskey-client-') %}
+      {{ tailscale_authkey }}?ephemeral={{ tailscale_oauth_ephemeral | bool }}&preauthorized={{ tailscale_oauth_preauthorized | bool }}
+      {# Check if the key is not OAuth (regular authkey or unused) #}
+      {% else %}
+      {{ tailscale_authkey }}
+      {% endif %}
+    tailscale_tags_string: >-
+      {% if tailscale_tags | length > 0 %}
+      --advertise-tags={{ tailscale_prepared_tags | join(',') }}
+      {% endif %}
+  no_log: true
+
+- name: Authkey Type
+  ansible.builtin.debug:
+    msg: "{{ tailscale_authkey_type | trim }}"
+
+- name: Build the final tailscale_args
+  ansible.builtin.set_fact:
+    tailscale_args_string: "{{ tailscale_args }} {{ tailscale_tags_string | trim }} --timeout={{ tailscale_up_timeout | trim }}s"
+  no_log: true
+
+- name: Final `tailscale up` arguments string
+  ansible.builtin.debug:
+    msg: "{{ tailscale_args_string | trim }}"
+  no_log: true
+
+- name: Save State
+  ansible.builtin.template:
+    src: state.j2
+    dest: "{{ tailscale_state_folder }}/{{ tailscale_statefile_name }}"
+    owner: "{{ ansible_user_uid }}"
+    group: "{{ ansible_user_gid }}"
+    mode: '0644'
+  register: state_file
+
+- name: Bring Tailscale Up
+  become: true
+  ansible.builtin.command: "tailscale up {{ tailscale_args_string | trim }} --authkey={{ tailscale_authkey_string | trim }} --hostname={{ tailscale_hostname }} --ssh"
+  changed_when: true
+  register: tailscale_start
+  when:
+    - not tailscale_up_skip
+    - state_file is changed or not tailscale_is_online
+  notify: Confirm Tailscale is Connected
+  async: "{{ (tailscale_up_timeout | trim | int) + 10 }}"
+  poll: 5
+
+- name: Report non-sensitive stdout from "tailscale up"
+  ansible.builtin.debug:
+    msg: "{{ tailscale_start.stdout | replace(tailscale_authkey, 'REDACTED') | regex_replace('\\t', '') | split('\n') }}"
+  when:
+    - tailscale_start is failed
+    - tailscale_start.stdout | length > 0
+  register: nonsensitive_stdout
+
+- name: Pausing to highlight stdout message above
+  ansible.builtin.wait_for:
+    timeout: 5
+  when: nonsensitive_stdout is not skipped
+
+- name: Clear State Upon Error
+  ansible.builtin.file:
+    path: "{{ tailscale_state_folder }}/tailscale-ocl/state"
+    state: absent
+  when:
+    - tailscale_start is failed
+
+- name: Report redacted failure from "tailscale up"
+  ansible.builtin.fail:
+    msg: "{{ tailscale_start.stderr | default () | regex_replace(tailscale_authkey, 'REDACTED') | regex_replace('\\t', '') | split('\n') }}"
+  when:
+    - tailscale_start is failed

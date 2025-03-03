@@ -1,0 +1,58 @@
+---
+- name: Check If Tailscale Is Connected
+  ansible.builtin.command: tailscale status
+  changed_when: false
+  failed_when: false
+  register: tailscale_status
+
+- name: De-register Tailscale Node
+  ansible.builtin.shell: tailscale status; tailscale logout
+  register: tailscale_logout
+  changed_when: "'Logged out.' not in tailscale_status.stdout and 'not logged in' not in tailscale_status.stdout"
+  when:
+    # [Errno 2] No such file or directory: 'tailscale'
+    - tailscale_status.rc != 2
+    # "bash: tailscale: command not found"
+    - tailscale_status.rc != 127
+
+- name: Delete Tailscale State file
+  ansible.builtin.file:
+    path: "{{ ansible_env.HOME + '/.local/state' }}/"
+    state: absent
+
+- name: Stop Tailscale Service
+  become: true
+  ansible.builtin.service:
+    name: "{{ tailscale_service }}"
+    state: stopped
+    enabled: false
+
+- name: Remove Tailscale
+  become: true
+  ansible.builtin.apt:
+    name: "{{ tailscale_package }}"
+    state: absent
+
+- name: Remove Tailscale repo
+  become: true
+  ansible.builtin.apt_repository:
+    repo: "{{ tailscale_apt_repo }}"
+    state: absent
+
+- name: Remove Tailscale Signing Key from trusted.gpg
+  become: true
+  ansible.builtin.apt_key:
+    url: "{{ tailscale_apt_signkey }}"
+    state: absent
+
+- name: Remove Tailscale Signing Key from keyrings
+  become: true
+  ansible.builtin.file:
+    path: "{{ tailscale_apt_keyring_path }}"
+    state: absent
+
+- name: Remove Dependencies for Tailscale
+  ansible.builtin.apt:
+    name: "{{ tailscale_apt_dependencies }}"
+    cache_valid_time: 3600
+    state: absent

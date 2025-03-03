@@ -1,2 +1,2 @@
 [target]
-<server ip> ansible_user=root
+<server1> ansible_user=root
