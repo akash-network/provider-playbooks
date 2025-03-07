@@ -8,18 +8,18 @@
   roles:
     - op
 
-- name: GPU Playbook
-  hosts: "{{ host }}"
-  become: true
-  become_user: root
-  serial: "{{ serial_hosts | default(1) }}"
-  roles:
-    - gpu
+# - name: GPU Playbook
+#   hosts: "{{ host }}"
+#   become: true
+#   become_user: root
+#   serial: "{{ serial_hosts | default(1) }}"
+#   roles:
+#     - gpu
 
-- name: Tailscale Playbook
-  hosts: "{{ host }}"
-  become: true
-  become_user: root
-  serial: "{{ serial_hosts | default(1) }}"
-  roles:
-    - tailscale
+# - name: Tailscale Playbook
+#   hosts: "{{ host }}"
+#   become: true
+#   become_user: root
+#   serial: "{{ serial_hosts | default(1) }}"
+#   roles:
+#     - tailscale
