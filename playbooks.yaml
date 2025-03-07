@@ -7,7 +7,7 @@
     - onepassword.connect
   roles:
     - op
----
+
 - name: GPU Playbook
   hosts: "{{ host }}"
   become: true
@@ -15,7 +15,7 @@
   serial: "{{ serial_hosts | default(1) }}"
   roles:
     - gpu
----
+
 - name: Tailscale Playbook
   hosts: "{{ host }}"
   become: true
