@@ -11,11 +11,6 @@
   - always
   - init
 
-- name: Deploy connect sync server
-  ansible.builtin.import_tasks: connect.yml
-  tags: 
-  - connect
-
 - name: Fetch provider keys
   ansible.builtin.import_tasks: fetch.yml
   tags:

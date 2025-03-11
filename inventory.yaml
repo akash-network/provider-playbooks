@@ -1,0 +1,11 @@
+all:
+  children:
+    local:
+      hosts:
+        localhost:
+          ansible_connection: local
+
+    target:
+      hosts:
+        <server1>:
+          ansible_user: root

@@ -1,13 +1,13 @@
 ---
 # vars file for 1P
 provider_name: ""            ## Enter your provider name here
-vault_name: "Providerss"
+vault_name: "Providers"
 connect_host: "http://localhost:8080"
 
 provider_b64_key_field: b64-key
 provider_b64_sec_field: b64-keysecret
 
-opconnect_account_name: my.1password.com
+opconnect_account_name: akashnetwork.1password.com
 opconnect_server_name: op_connect_server
 opconnect_token_name: op_connect_token
 

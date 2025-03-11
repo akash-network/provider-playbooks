@@ -1,13 +1,13 @@
 services:
   op-connect-api:
-    image: 1password/connect-api:latest
+    image: 1password/connect-api:1.7.3
     ports:
       - "8080:8080"
     volumes:
       - "./1password-credentials.json:/home/opuser/.op/1password-credentials.json"
       - "data:/home/opuser/.op/data"
   op-connect-sync:
-    image: 1password/connect-sync:latest
+    image: 1password/connect-sync:1.7.3
     volumes:
       - "./1password-credentials.json:/home/opuser/.op/1password-credentials.json"
       - "data:/home/opuser/.op/data"
