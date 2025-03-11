@@ -1,8 +1,6 @@
 ---
 - name: Retrieve op items
   hosts: localhost
-  environment:
-    OP_CONNECT_HOST: "{{ connect_host }}/v1/vaults"
   roles:
     - op
   tags:
@@ -27,3 +25,11 @@
     - tailscale
   tags:
     - tailscale
+
+- name: Provider Playbook
+  hosts: "{{ host }}"
+  serial: "{{ serial_hosts | default(1) }}"
+  roles:
+    - provider
+  tags:
+    - provider

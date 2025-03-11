@@ -1,0 +1,22 @@
+all:
+  hosts:
+    t100.abc.xy.akash.pub:
+      ansible_host: 34.121.177.184
+      ip: 34.121.177.184
+      access_ip: 34.121.177.184
+  children:
+    kube_control_plane:
+      hosts:
+        t100.abc.xy.akash.pub:
+    kube_node:
+      hosts:
+        t100.abc.xy.akash.pub:
+    etcd:
+      hosts:
+        t100.abc.xy.akash.pub:
+    k8s_cluster:
+      children:
+        kube_control_plane:
+        kube_node:
+    calico_rr:
+      hosts: {}

@@ -40,6 +40,15 @@
     provider_b64_keysecret: "{{ b64_key_output.results[1].stdout | default('') }}"
   no_log: true
 
+- name: Save provider variables to temporary file on remote host
+  ansible.builtin.copy:
+    content: |
+      provider_b64_key: {{ provider_b64_key }}
+      provider_b64_keysecret: {{ provider_b64_keysecret }}
+    dest: "/tmp/provider_vars_temp.txt"
+    mode: '0600'
+  no_log: true
+
 - name: Check if keys were retrieved successfully
   ansible.builtin.set_fact:
     b64_key_success: "{{ provider_b64_key | length > 0 }}"
