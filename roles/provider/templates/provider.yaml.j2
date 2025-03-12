@@ -54,12 +54,12 @@ attributes:
 email: hosting@ovrclk.com
 website: "{{ website }}"
 organization: "organization"
-price_target_cpu: 1.60
-price_target_memory: 0.30
-price_target_hd_ephemeral: 0.02
-price_target_hd_pers_hdd: 0.01
-price_target_hd_pers_ssd: 0.03
-price_target_hd_pers_nvme: 0.1
-price_target_endpoint: 0.05
-price_target_ip: 5
-price_target_gpu_mappings: "a100=569,*=569"
+price_target_cpu: "{{ price_cpu }}"
+price_target_memory: "{{ price_memory }}"
+price_target_hd_ephemeral: "{{ price_hd_ephemeral }}"
+price_target_hd_pers_hdd: "{{ price_hd_pers_hdd }}"
+price_target_hd_pers_ssd: "{{ price_hd_pers_ssd }}"
+price_target_hd_pers_nvme: "{{ price_hd_pers_nvme }}"
+price_target_endpoint: "{{ price_endpoint }}"
+price_target_ip: "{{ price_ip }}"
+price_target_gpu_mappings: "{{ price_gpu_mappings }}"
