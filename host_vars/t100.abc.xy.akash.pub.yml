@@ -1,0 +1,8 @@
+akash1_address: "" # REDACTED
+key: "{{ provider_b64_key }}"
+keysecret: "{{ provider_b64_keysecret }}"
+domain: t100.abc.xy.akash.pub
+city: abc
+storage_one_class: false
+storage_one_persistent: false
+storage_two_persistent: false

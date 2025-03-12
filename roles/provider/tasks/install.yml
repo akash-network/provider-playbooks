@@ -1,0 +1,132 @@
+---
+- name: Create namespaces with labels
+  kubernetes.core.k8s:
+    name: "{{ item.name }}"
+    kind: Namespace
+    state: present
+    api_version: v1
+    definition:
+      metadata:
+        labels: "{{ item.labels }}"
+  loop:
+    - name: akash-services
+      labels:
+        akash.network/name: akash-services
+        akash.network: 'true'
+    - name: lease
+      labels:
+        akash.network: 'true'
+  
+- name: Install Akash Helm charts
+  kubernetes.core.helm:
+    name: "{{ item.name }}"
+    chart_ref: "akash/{{ item.chart }}"
+    release_namespace: akash-services
+    release_values: "{{ item.values }}"
+    values:
+      image_tag: "{{ provider_version }}"
+  loop:
+    - name: akash-hostname-operator
+      chart: akash-hostname-operator
+    - name: inventory-operator
+      chart: akash-inventory-operator
+    - name: akash-node
+      chart: akash-node
+
+- name: Apply Akash CRD from URL
+  kubernetes.core.k8s:
+    state: present
+    src: "https://raw.githubusercontent.com/akash-network/provider/v{{ provider_version }}/pkg/apis/akash.network/crd.yaml"
+  register: k8s_result
+
+- name: Display success message for CRD application
+  debug:
+    msg: "Akash CRDs were applied successfully"
+  when: k8s_result is succeeded
+
+- name: Create provider directory in specific user's home directory
+  file:
+    path: "/root/provider"
+    state: directory
+    mode: '0755'
+
+- name: Copy price_script.sh to /root/provider/ directory
+  copy:
+    src: "files/price_script.sh"
+    dest: "/root/provider/"
+    mode: '0755'
+
+- name: Read and base64 encode the price_script.sh file
+  shell: cat /root/provider/price_script.sh | openssl base64 -A
+  register: pricing_script_b64
+
+- name: copy the provider.yaml
+  template:
+    src: provider.yaml.j2
+    dest:  /root/provider/provider.yaml
+
+- name: Install Akash provider using Helm
+  kubernetes.core.helm:
+    name: akash-provider
+    chart_ref: akash/provider
+    release_namespace: akash-services
+    values:
+      image_tag: "{{ provider_version }}"
+      bidpricescript: "{{ pricing_script_b64.stdout }}"      
+    values_files:
+      - /root/provider/provider.yaml
+
+- name: Create NGINX Ingress configuration file
+  copy:
+    dest: "/root/ingress-nginx-custom.yaml"
+    content: |
+      controller:
+        service:
+          type: ClusterIP
+        ingressClassResource:
+          name: "akash-ingress-class"
+        kind: DaemonSet
+        hostPort:
+          enabled: true
+        admissionWebhooks:
+          port: 7443
+        config:
+          allow-snippet-annotations: false
+          compute-full-forwarded-for: true
+          proxy-buffer-size: "16k"
+        metrics:
+          enabled: true
+        extraArgs:
+          enable-ssl-passthrough: true
+      tcp:
+        "8443": "akash-services/akash-provider:8443"
+        "8444": "akash-services/akash-provider:8444"
+
+- name: Install/Upgrade NGINX Ingress Controller using Helm
+  kubernetes.core.helm:
+    name: ingress-nginx
+    chart_ref: ingress-nginx/ingress-nginx
+    chart_version: 4.12.0
+    release_namespace: ingress-nginx
+    create_namespace: true
+    values_files:
+      - /root/ingress-nginx-custom.yaml
+
+- name: Apply Kubernetes labels
+  kubernetes.core.k8s:
+    state: patched
+    kind: "{{ item.kind }}"
+    name: "{{ item.name }}"
+    definition:
+      metadata:
+        labels: "{{ item.labels }}"
+  loop:
+    - kind: Namespace
+      name: ingress-nginx
+      labels:
+        app.kubernetes.io/name: ingress-nginx
+        app.kubernetes.io/instance: ingress-nginx
+    - kind: IngressClass
+      name: akash-ingress-class
+      labels:
+        akash.network: "true"

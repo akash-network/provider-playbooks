@@ -1,10 +1,6 @@
 ---
 - name: Retrieve op items
   hosts: localhost
-  environment:
-    OP_CONNECT_HOST: "{{ connect_host }}/v1/vaults"
-  collections:
-    - onepassword.connect
   roles:
     - op
   tags:
@@ -29,3 +25,13 @@
     - tailscale
   tags:
     - tailscale
+
+- name: Provider Playbook
+  hosts: "{{ host }}"
+  become: true
+  become_user: root
+  serial: "{{ serial_hosts | default(1) }}"
+  roles:
+    - provider
+  tags:
+    - provider

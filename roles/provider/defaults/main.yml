@@ -1,0 +1,41 @@
+---
+# defaults file for provider
+node: "http://akash-node-1:26657"
+domain: "test.dsa.100.akash.pub"
+withdrawal_period: "12h"
+chain_id: "akashnet-2"
+cuda_version: 12.7
+region: "us-central"
+country: "US"
+host: "akash"
+tier: "community"
+organization: "overclock"
+city: "DSM"
+location_type: "datacenter"
+cpu: "intel"
+cpu_arch: "x86-64"
+gpu: "nvidia"
+gpu_model_a100: "true"
+gpu_model_a100_ram_80: "true"
+gpu_model_a100_ram_sxm: "true"
+gpu_model_a100_sxm: "true"
+storage_one_class: "beta3"
+storage_one_persistent: "true"
+storage_two_class: "ram"
+storage_two_persistent: "false"
+memory: "ddr5ecc"
+network_speed_up: 10000
+network_speed_down: 10000
+email: "hosting@ovrclk.com"
+website: "https://akash.network"
+
+# price targets
+price_cpu: 1.60
+price_memory: 0.30
+price_hd_ephemeral: 0.02
+price_hd_pers_hdd: 0.01
+price_hd_pers_ssd: 0.03
+price_hd_pers_nvme: 0.1
+price_endpoint: 0.05
+price_ip: 5
+price_gpu_mappings: "a100=569,*=569"

@@ -27,5 +27,3 @@ ansible-playbook playbooks.yaml -v
 | `provider_b64_key_field` | b64-key that will be fetched from the vault        | No       | b64-key               |
 | `provider_b64_sec_field` | b64-keysecret that will be fetched from the vault  | No       | b64-keysecret         |
 | `opconnect_account_name` | Account name for the OP                            | Yes      | my.1password.com      |
-| `opconnect_server_name`  | Server name for the OP connect                     | No       | op_connect_server     |
-| `opconnect_token_name`   | Token name for the server in OP connect            | No       | op_connect_token      |
