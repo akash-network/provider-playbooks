@@ -75,8 +75,6 @@
       bidpricescript: "{{ pricing_script_b64.stdout }}"      
     values_files:
       - /root/provider/provider.yaml
-  
-
 
 - name: Create NGINX Ingress configuration file
   copy:

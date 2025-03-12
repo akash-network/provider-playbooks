@@ -30,5 +30,5 @@
 
 - name: Clean up temporary YAML file
   ansible.builtin.file:
-    path: "/tmp/provider_vars_temp.yml"
+    path: "/tmp/provider_vars_temp.txt"
     state: absent
