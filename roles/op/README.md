@@ -3,15 +3,24 @@ This guide provides details on how to use OP Ansible role to retrieve the b64-ke
 
 ### Prerequisites
 - 1password-cli
-- Docker
-- Docker compose
 
-### Install the requirements
-We need to install the Docker collection. We use Docker Compose to spin up the OP Connect server locally. This facilitates fetching keys from the OP vault.
+### 
+- Generate the provider mnemonic seed and fund the provider account derived off of that seed.
+- Generate the provider key and encrypt it with a new password. This will prompt for the mnemonic.
+    ```
+    provider-services keys add default --recover
+    provider-services keys export default
+    ```
+- Create a key.pem file and Copy the output of the prior command (provider-services keys export default) into the key.pem file
 
-```
-ansible-galaxy install -r requirements.yml
-```
+- Encode the provider key & provider key password into base64.
+
+    ```
+    cat key.pem | openssl base64 -A
+    echo -n '<passphrase>' | base64
+    ```
+
+- Create these records (b64-key, b64-keysecret) in 1password under <vault_name>/<provider-name>/ in 1Password. The vault_name is defaulted to `Providers`. This can be changed in vars/main.yml
 
 ### Running the playbook
 ```
