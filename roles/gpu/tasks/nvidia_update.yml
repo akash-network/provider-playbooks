@@ -72,11 +72,11 @@
     if lsmod | grep -q nvidia; then rmmod -f nvidia; fi
   args:
     executable: /bin/bash
-      
+
 - name: Sleep for a moment
   ansible.builtin.pause:
     seconds: 5
-      
+
 - name: Load dependent NVIDIA modules one by one
   ansible.builtin.shell: "modprobe {{ item }}"
   loop:
@@ -84,7 +84,18 @@
     - nvidia_modeset
     - nvidia_drm
     - nvidia_uvm
-    - gdrdrv
+
+- name: Check if gdrdrv module exists
+  ansible.builtin.command: modinfo gdrdrv
+  register: gdrdrv_check
+  failed_when: false
+  changed_when: false
+
+- name: Load gdrdrv module if available
+  ansible.builtin.command: modprobe gdrdrv
+  when: gdrdrv_check.rc == 0
+  register: gdrdrv_load
+  failed_when: false
 
 - name: Check if NVIDIA GPUs are PCIe
   ansible.builtin.shell: nvidia-smi -L
