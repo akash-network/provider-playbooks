@@ -25,6 +25,7 @@
       metadata:
         labels:
           allow-nvdp: "true"
+          nvidia.com/gpu.present: "true"
   loop: "{{ gpu_nodes }}"
 
 - name: Add NVIDIA Device Plugin Helm repository

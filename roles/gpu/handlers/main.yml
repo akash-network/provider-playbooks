@@ -8,9 +8,3 @@
   when:
   - has_pcie is none
   - has_passed
-
-- name: Disable unattended-upgrades service
-  ansible.builtin.systemd:
-    name: unattended-upgrades
-    state: stopped
-    masked: yes
