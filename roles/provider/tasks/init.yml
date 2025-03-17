@@ -1,12 +1,12 @@
 ---
 - name: Check if provider vars file exists
-  stat:
+  ansible.builtin.stat:
     path: /tmp/provider_vars_temp.txt
   delegate_to: localhost
   register: provider_vars_file
 
 - name: Fail playbook if provider vars file does not exist
-  fail:
+  ansible.builtin.fail:
     msg: "The provider_b64_key and provider_b64_keysecret were not found. Please run the op role first or pass the provider_b64_key & provider_b64_keysecret via extra vars"
   when: not provider_vars_file.stat.exists
 
