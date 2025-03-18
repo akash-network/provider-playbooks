@@ -13,7 +13,7 @@ The repository is organized as follows:
 │   ├── provider/            # Provider-specific configurations
 │   ├── op/                  # 1Password integration
 │   ├── gpu/                 # GPU driver and runtime setup
-│   └── cron/                # Cron job configurations
+│   └── os/                  # sysctl, cron job configurations
 ├── host_vars/               # Host-specific variables
 ├── playbooks.yaml           # Main playbook definitions
 ├── inventory.yaml           # Inventory configuration

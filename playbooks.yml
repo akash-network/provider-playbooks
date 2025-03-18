@@ -23,10 +23,10 @@
   serial: "{{ serial_hosts | default(1) }}"
   roles:
     - provider
-    - cron
+    - os
   tags:
     - provider
-    - cron
+    - os
 
 - name: GPU Playbook
   hosts: "{{ host }}"

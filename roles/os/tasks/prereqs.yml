@@ -1,0 +1,73 @@
+---
+- name: Check current swap configuration
+  ansible.builtin.command: cat /proc/swaps
+  register: swap_status
+  changed_when: false
+  
+- name: Turn off swap
+  ansible.builtin.command: swapoff /swap.img
+  when: "'/swap.img' in swap_status.stdout"
+
+- name: Check if swap entry exists in fstab
+  ansible.builtin.shell: grep -q "/swap.img" /etc/fstab
+  register: swap_entry_check
+  failed_when: false
+  changed_when: false
+
+- name: Comment out swap entry in fstab
+  ansible.builtin.lineinfile:
+    path: /etc/fstab
+    regexp: '^([^#].*\s+/swap.img\s+.*)'
+    backrefs: yes
+    line: '#\1'
+  register: fstab_status
+  when: swap_entry_check.rc == 0
+
+- name: Show changes made to fstab
+  ansible.builtin.debug:
+    msg: "Changes were made to /etc/fstab"
+  when: fstab_status.changed | default(false)    
+      
+- name: Check root account expiry settings
+  ansible.builtin.command: chage -l root
+  register: root_settings
+  changed_when: false
+
+- name: Display current root account settings
+  ansible.builtin.debug:
+    var: root_settings.stdout_lines
+
+- name: Verify root account never expires
+  ansible.builtin.fail:
+    msg: "Root account is set to expire! This doesn't meet our security requirements."
+  when: "root_settings.stdout is not regex('Account expires.*: never')"
+
+- name: Create custom SSH config file
+  ansible.builtin.copy:
+    content: |
+      # Disable password-based authentication
+      PasswordAuthentication no
+      # Allow root login using the public SSH key
+      PermitRootLogin prohibit-password
+    dest: /etc/ssh/sshd_config.d/99-akash.conf
+    owner: root
+    group: root
+    mode: '0644'
+  register: ssh_config_updated
+
+- name: Get SSH service name
+  ansible.builtin.shell: systemctl list-units --type=service | grep -E 'ssh[d]?' | awk '{print $1}' | sed 's/\.service//'
+  register: ssh_service_name
+  changed_when: false
+      
+- name: Reload SSH service
+  ansible.builtin.systemd:
+    name: "{{ ssh_service_name.stdout }}"
+    state: reloaded
+  when: ssh_config_updated.changed and ssh_service_name.stdout != ""
+
+- name: Install chrony
+  ansible.builtin.apt:
+    name: chrony
+    state: present
+    update_cache: yes  

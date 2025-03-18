@@ -1,19 +1,4 @@
 ---
-- name: Create sysctl configuration file for Akash
-  ansible.builtin.copy:
-    dest: /etc/sysctl.d/90-akash.conf
-    content: |
-      # Common: tackle "failed to create fsnotify watcher: too many open files"
-      fs.inotify.max_user_instances = 512
-      fs.inotify.max_user_watches = 1048576
-
-      # Custom: increase memory mapped files limit to allow Solana node
-      # https://docs.solana.com/running-validator/validator-start
-      vm.max_map_count = 1000000
-
-- name: Apply sysctl parameters
-  ansible.builtin.command: sysctl -p /etc/sysctl.d/90-akash.conf
-
 - name: Remove Akash Helm repository if it exists
   ansible.builtin.command: helm repo remove akash
   register: remove_result

@@ -1,7 +1,0 @@
----
-# tasks file for cron
-- name: Log rotation
-  ansible.builtin.import_tasks: journal_cleanup.yml
-
-- name: Provider crons
-  ansible.builtin.import_tasks: provider_crons.yml
