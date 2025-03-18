@@ -1,6 +1,6 @@
 ---
 - name: Remove Akash Helm repository if it exists
-  command: helm repo remove akash
+  ansible.builtin.command: helm repo remove akash
   register: remove_result
   failed_when: >
     remove_result.rc != 0 and 
@@ -18,6 +18,6 @@
     - { name: "ingress-nginx", url: "https://kubernetes.github.io/ingress-nginx" }
 
 - name: Update Helm repositories
-  command: helm repo update
+  ansible.builtin.command: helm repo update
   register: helm_update
   changed_when: "'Update Complete' in helm_update.stdout"

@@ -1,21 +1,4 @@
 ---
-- name: Retrieve op items
-  hosts: localhost
-  roles:
-    - op
-  tags:
-    - op
-
-- name: GPU Playbook
-  hosts: "{{ host }}"
-  become: true
-  become_user: root
-  serial: "{{ serial_hosts | default(1) }}"
-  roles:
-    - gpu
-  tags:
-    - gpu
-
 - name: Tailscale Playbook
   hosts: "{{ host }}"
   become: true
@@ -35,3 +18,21 @@
     - provider
   tags:
     - provider
+
+- name: Retrieve op items
+  hosts: localhost
+  roles:
+    - op
+  tags:
+    - op
+
+- name: GPU Playbook
+  hosts: "{{ host }}"
+  become: true
+  become_user: root
+  serial: "{{ serial_hosts | default(1) }}"
+  roles:
+    - gpu
+  tags:
+    - gpu
+

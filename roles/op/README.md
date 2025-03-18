@@ -4,7 +4,7 @@ This guide provides details on how to use OP Ansible role to retrieve the b64-ke
 ### Prerequisites
 - 1password-cli
 
-### 
+### Saving Key and Key Secrets to OP
 - Generate the provider mnemonic seed and fund the provider account derived off of that seed.
 - Generate the provider key and encrypt it with a new password. This will prompt for the mnemonic.
     ```

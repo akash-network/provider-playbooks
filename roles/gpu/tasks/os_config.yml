@@ -11,5 +11,3 @@
     name: unattended-upgrades
     state: absent
     purge: yes
-  notify:
-    - Disable unattended-upgrades service

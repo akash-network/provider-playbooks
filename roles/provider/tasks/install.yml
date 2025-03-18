@@ -40,28 +40,28 @@
   register: k8s_result
 
 - name: Display success message for CRD application
-  debug:
+  ansible.builtin.debug:
     msg: "Akash CRDs were applied successfully"
   when: k8s_result is succeeded
 
 - name: Create provider directory in specific user's home directory
-  file:
+  ansible.builtin.file:
     path: "/root/provider"
     state: directory
     mode: '0755'
 
 - name: Copy price_script.sh to /root/provider/ directory
-  copy:
+  ansible.builtin.copy:
     src: "files/price_script.sh"
     dest: "/root/provider/"
     mode: '0755'
 
 - name: Read and base64 encode the price_script.sh file
-  shell: cat /root/provider/price_script.sh | openssl base64 -A
+  ansible.builtin.shell: cat /root/provider/price_script.sh | openssl base64 -A
   register: pricing_script_b64
 
 - name: copy the provider.yaml
-  template:
+  ansible.builtin.template:
     src: provider.yaml.j2
     dest:  /root/provider/provider.yaml
 
@@ -77,7 +77,7 @@
       - /root/provider/provider.yaml
 
 - name: Create NGINX Ingress configuration file
-  copy:
+  ansible.builtin.copy:
     dest: "/root/ingress-nginx-custom.yaml"
     content: |
       controller:
