@@ -1,0 +1,40 @@
+- name: Create journalctl cleanup cron job
+  ansible.builtin.copy:
+    dest: /etc/cron.d/journal-cleanup
+    content: |
+      # Clean up journalctl logs daily at midnight
+      # Keep only the last 500MB of logs
+      0 0 * * * root /usr/bin/journalctl --vacuum-size=500M
+    owner: root
+    group: root
+    mode: '0644'
+
+
+- name: Rsyslog fix
+# Refer:
+#https://andrewmemory.wordpress.com/2022/11/26/ubuntu-22-04-logs-not-rotating/
+#https://askubuntu.com/questions/1429612/ubuntu-22-04-logrotate-not-working-after-upgrade-to-ubuntu-22-04/
+  block:
+    - name: Remove syslog logrotate config
+      ansible.builtin.file:
+        path: /etc/logrotate.d/syslog
+        state: absent
+
+    - name: Add 'su syslog syslog' in rsyslog logrotate config
+      ansible.builtin.lineinfile:
+        path: /etc/logrotate.d/rsyslog
+        insertbefore: '^\s*rotate\s+4'
+        line: '  su syslog syslog'
+        state: present
+
+    - name: Run logrotate with system configuration
+      ansible.builtin.command: /usr/sbin/logrotate /etc/logrotate.conf
+      register: logrotate_result
+      changed_when: logrotate_result.stdout != "" or logrotate_result.stderr != ""
+      failed_when: false
+
+    - name: Force run logrotate for rsyslog
+      ansible.builtin.command: logrotate -f /etc/logrotate.d/rsyslog
+      register: logrotate_force_result
+      changed_when: logrotate_force_result.stdout != "" or logrotate_force_result.stderr != ""
+      failed_when: false

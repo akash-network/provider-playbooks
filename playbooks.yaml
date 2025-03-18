@@ -16,8 +16,10 @@
   serial: "{{ serial_hosts | default(1) }}"
   roles:
     - provider
+    - cron
   tags:
     - provider
+    - cron
 
 - name: Retrieve op items
   hosts: localhost

@@ -1,0 +1,1 @@
+This ansible role covers the tasks to setup cron.
