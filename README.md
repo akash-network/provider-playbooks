@@ -49,7 +49,12 @@ kube_scheduler_profiles:
               weight: 1
 ```
 
-- To run the Ansible playbook:
+- To run the Ansible playbook
 ```bash
-ansible-playbook -i inventory.yaml playbooks.yaml -e "host=<IP>" -v --list-tasks
+# Run the complete Ansible playbook
+ansible-playbook -i inventory.yaml playbooks.yaml -e "host=<IP>" -v
+
+# Run specific plays using tags
+# Available tags: op, provider, cron, gpu, tailscale
+ansible-playbook -i inventory.yaml playbooks.yaml -t <tag_name> -e "host=<IP>" -v
 ```
