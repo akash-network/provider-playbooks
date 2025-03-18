@@ -1,0 +1,43 @@
+---
+- name: Copy scripts to /usr/local/bin and make them executable
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "/usr/local/bin/{{ item }}"
+    mode: '0755'
+    owner: root
+    group: root
+  loop:
+    - akash-force-new-replicasets.sh
+    - kill_zombie_parents.sh
+
+- name: Create Kubernetes maintenance cron jobs
+  ansible.builtin.copy:
+    dest: "/etc/cron.d/{{ item.filename }}"
+    content: "{{ item.content }}"
+    owner: root
+    group: root
+    mode: '0644'
+  loop:
+    - filename: akash-restart-operator
+      content: |
+        PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+        SHELL=/bin/bash
+        KUBECONFIG=/root/.kube/config
+        0 */4 * * * root kubectl -n akash-services rollout restart deployment/operator-inventory
+    - filename: akash-delete-failed-pods
+      content: |
+        PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+        SHELL=/bin/bash
+        KUBECONFIG=/root/.kube/config
+        */10 * * * * root kubectl delete pods -A -l akash.network=true --field-selector status.phase=Failed
+    - filename: akash-force-new-replicasets
+      content: |
+        PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+        SHELL=/bin/bash
+        KUBECONFIG=/root/.kube/config
+        */5 * * * * root /usr/local/bin/akash-force-new-replicasets.sh
+    - filename: kill_zombie_parents
+      content: |
+        PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+        SHELL=/bin/bash
+        */5 * * * * root /usr/local/bin/kill_zombie_parents.sh | logger -t kill_zombie_parents      
