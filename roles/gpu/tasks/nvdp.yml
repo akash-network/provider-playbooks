@@ -25,7 +25,6 @@
       metadata:
         labels:
           allow-nvdp: "true"
-          nvidia.com/gpu.present: "true"
   loop: "{{ gpu_nodes }}"
 
 - name: Add NVIDIA Device Plugin Helm repository
@@ -43,7 +42,6 @@
     {
       "name": .metadata.name,
       "has_allow_nvdp": (.metadata.labels."allow-nvdp" == "true"),
-      "has_gpu_present": (.metadata.labels."nvidia.com/gpu.present" == "true")
     } | tostring'
   register: node_labels_check
   changed_when: false
@@ -55,22 +53,20 @@
 - name: Display nodes missing required labels
   ansible.builtin.debug:
     msg: "Node {{ item.name }} missing labels: {{
-      (item.has_allow_nvdp == false) | ternary('allow-nvdp=true ', '') }}{{
-      (item.has_gpu_present == false) | ternary('nvidia.com/gpu.present=true', '') }}"
+      (item.has_allow_nvdp == false) | ternary('allow-nvdp=true ', '') }}"
   loop: "{{ parsed_node_labels }}"
-  when: not (item.has_allow_nvdp and item.has_gpu_present)
+  when: not (item.has_allow_nvdp)
 
 - name: Fail if required labels are missing
   ansible.builtin.fail:
     msg: "Node {{ item.name }} is missing required labels: {{
-      (item.has_allow_nvdp == false) | ternary('allow-nvdp=true ', '') }}{{
-      (item.has_gpu_present == false) | ternary('nvidia.com/gpu.present=true', '') }}"
+      (item.has_allow_nvdp == false) | ternary('allow-nvdp=true ', '') }}"
   loop: "{{ parsed_node_labels }}"
-  when: not (item.has_allow_nvdp and item.has_gpu_present)
+  when: not (item.has_allow_nvdp)
 
 - name: Check if any node has all required labels
   ansible.builtin.set_fact:
-    labels_ready: "{{ labels_ready | default(false) or (item.has_allow_nvdp and item.has_gpu_present) }}"
+    labels_ready: "{{ labels_ready | default(false) or (item.has_allow_nvdp) }}"
   loop: "{{ parsed_node_labels }}"
 
 - name: Install NVIDIA Device Plugin
