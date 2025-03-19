@@ -21,3 +21,51 @@ ansible-playbook -i inventory.yml playbooks.yml -e "host=<IP>" -v
 # Available tags: op, provider, cron, gpu, tailscale
 ansible-playbook -i inventory.yml playbooks.yml -t <tag_name> -e "host=<IP>" -v
 ```
+
+
+### Prerequisites
+Before running any Ansible playbooks, please ensure:
+
+1. Passwordless SSH access is configured between your Ansible control node and all target machines.
+2. Server configuration:
+    - Replace <server1> with the actual IP address of your target server
+    - Add additional server entries for multi-node clusters
+This setup ensures Ansible can communicate securely with all nodes in your infrastructure without requiring password authentication during playbook execution.
+
+**Note:**
+These Ansible playbooks have been tested on macOS and can be run from any macOS environment with Ansible installed. The *inventory.yml* file contains all target hosts where Ansible will deploy the configured tasks. Make sure this inventory file is properly configured with your server information before running any playbooks. The syntax remains the same on macOS as it would be on other UNIX-based systems.
+
+#### Deploy Tailscale
+```bash
+ansible-playbook playbooks.yml -i inventory.yml -t tailscale -v -e 'tailscale_authkey=tskey-auth-xxxx host=node1.t100.abc.xy.akash.pub'
+```
+Note: You can set the tailscale_hostname option using extra vars or define it in the host_vars file.
+**eg:**
+```bash
+ansible-playbook playbooks.yml -i inventory.yml -t tailscale -v -e 'tailscale_authkey=tskey-auth-xxxx host=node1.t100.abc.xy.akash.pub tailscale_hostname=node1.t100.abc.xy.akash.pub'
+```
+
+#### Configure Hosts
+```bash
+ansible-playbook playbooks.yml -i inventory.yml -t os -v \
+  -e 'host=node1.t100.abc.xy.akash.pub'
+```
+
+#### Deploy Provider
+```bash
+ansible-playbook playbooks.yml -i inventory.yml -t op,provider -v -e 'provider_name=t100.abc.xy.akash.pub provider_version=0.6.9 host=node1.t100.abc.xy.akash.pub akash1_address=akash1xxxx'
+```
+
+#### Configure GPU
+```bash
+ansible-playbook -i inventory.yaml playbooks.yaml -t gpu -v -e "host=10.4.8.196"
+```
+
+#### Common Options
+Verbosity levels: -v, -vv, -vvv, -vvvv
+Extra variables (-e): Takes highest precedence over other variable definitions
+#### Target host control
+    -e "host=<ip>" - Target a specific IP
+    -e "host=<group>" - Target a group defined in inventory.yml
+
+    Available tags (-t): tailscale, os, op, provider, gpu
