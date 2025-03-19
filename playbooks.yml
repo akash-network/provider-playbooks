@@ -22,11 +22,19 @@
   become_user: root
   serial: "{{ serial_hosts | default(1) }}"
   roles:
-    - provider
     - os
   tags:
-    - provider
     - os
+
+- name: Provider Playbook
+  hosts: "{{ host }}" # The target should be usually on a node where kubectl talks to the API server.
+  become: true
+  become_user: root
+  serial: "{{ serial_hosts | default(1) }}"
+  roles:
+    - provider
+  tags:
+    - provider
 
 - name: GPU Playbook
   hosts: "{{ host }}"

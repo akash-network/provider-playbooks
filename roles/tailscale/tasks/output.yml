@@ -1,7 +1,7 @@
 ---
 - name: Facts | Get IPv4 address
   ansible.builtin.command:
-    cmd: tailscale ip --4
+    cmd: tailscale ip -4
   register: tailscale_ipv4_cmd
   changed_when: false
 

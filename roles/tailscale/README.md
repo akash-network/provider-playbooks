@@ -5,7 +5,7 @@ Original work Copyright (c) Ari Kalfus under Apache License 2.0
 
 ### Running the playbooks
 ```
-ansible-playbook playbooks.yaml -e 'host=target' -i inv -v -t install -e 'tailscale_authkey=<auth key>'
+ansible-playbook playbooks.yml -e 'host=target' -i inventory_example.yml -v -t install -e 'tailscale_authkey=<auth key> host=k8s_cluster'
 ```
 
 ### Configuration Variables
@@ -24,8 +24,8 @@ ansible-playbook playbooks.yaml -e 'host=target' -i inv -v -t install -e 'tailsc
 | `tailscale_release`            | Tailscale release to be used for download and isntall    | No       | stable                |
 | `tailscale_package`            | Tailscale package name                                   | No       | tailscale             |
 | `tailscale_service`            | Tailscale service name                                   | No       | tailscaled            |
-| `tailscale_statefile_name`     | Tailscale statefile name                                 | No       | refer vars/main.yaml  |
-| `tailscale_apt_keyring_path`   | Apt key ring path                                        | No       | refer vars/main.yaml  |
-| `tailscale_apt_repo`           | Apt repository for the Tailscale Install                 | No       | refer vars/main.yaml  |
-| `tailscale_apt_signkey`        | GPU key for the Tailscale                                | No       | refer vars/main.yaml  |
-| `tailscale_apt_dependencies`   | Dependencies needed for Tailscale Install                | No       | refer vars/main.yaml  |
+| `tailscale_statefile_name`     | Tailscale statefile name                                 | No       | refer vars/main.yml  |
+| `tailscale_apt_keyring_path`   | Apt key ring path                                        | No       | refer vars/main.yml  |
+| `tailscale_apt_repo`           | Apt repository for the Tailscale Install                 | No       | refer vars/main.yml  |
+| `tailscale_apt_signkey`        | GPU key for the Tailscale                                | No       | refer vars/main.yml  |
+| `tailscale_apt_dependencies`   | Dependencies needed for Tailscale Install                | No       | refer vars/main.yml  |

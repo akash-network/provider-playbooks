@@ -26,7 +26,7 @@ Important: When running the ansible-playbook for operations, please use MacOS as
 
 ### Running the playbook
 ```
-ansible-playbook playbooks.yaml -v
+ansible-playbook -i inventory_example.yml playbooks.yml -v -e 'host=provider'
 ```
 
 ### Configuration Variables

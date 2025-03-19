@@ -16,7 +16,7 @@ ansible-galaxy install -r requirements.yml
 
 ### Running the playbook
 ```
-ansible-playbook -i inventory_example.yaml playbooks.yaml -e 'host=<provider_url> provider_name=<provider_url> provider_version=0.6.9 -e akash1_address="<akash1 address>"' -t op,provider -vv
+ansible-playbook -i inventory_example.yaml playbooks.yml -e 'host=<provider_url> provider_name=<provider_url> provider_version=0.6.9 -e akash1_address="<akash1 address>"' -t op,provider -vv
 ```
 
 ### Configuration Variables

@@ -15,9 +15,9 @@ This project tracks all tasks related to developing and maintaining custom Ansib
 ### To run the Ansible playbook
 ```bash
 # Run the complete Ansible playbook
-ansible-playbook -i inventory.yaml playbooks.yaml -e "host=<IP>" -v
+ansible-playbook -i inventory.yml playbooks.yml -e "host=<IP>" -v
 
 # Run specific plays using tags
 # Available tags: op, provider, cron, gpu, tailscale
-ansible-playbook -i inventory.yaml playbooks.yaml -t <tag_name> -e "host=<IP>" -v
+ansible-playbook -i inventory.yml playbooks.yml -t <tag_name> -e "host=<IP>" -v
 ```

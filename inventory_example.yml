@@ -1,6 +1,14 @@
 all:
   hosts:
-    t100.abc.xy.akash.pub:
+    t100.abc.xy.akash.pub_node1:
+      ansible_host: <IP>
+      ip: <IP>
+      access_ip: <IP>
+    node2:
+      ansible_host: <IP>
+      ip: <IP>
+      access_ip: <IP>
+    node3:
       ansible_host: <IP>
       ip: <IP>
       access_ip: <IP>
@@ -10,13 +18,12 @@ all:
         t100.abc.xy.akash.pub:
     kube_node:
       hosts:
-        t100.abc.xy.akash.pub:
-    etcd:
+        node2:
+        node3:
+    provider:
       hosts:
-        t100.abc.xy.akash.pub:
+        t100.abc.xy.akash.pub_node1:
     k8s_cluster:
       children:
         kube_control_plane:
         kube_node:
-    calico_rr:
-      hosts: {}
