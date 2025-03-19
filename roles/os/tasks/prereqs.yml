@@ -1,32 +1,58 @@
 ---
-- name: Check current swap configuration
+- name: Check swap status in /proc/swaps
   ansible.builtin.command: cat /proc/swaps
-  register: swap_status
+  register: proc_swaps
   changed_when: false
-  
-- name: Turn off swap
-  ansible.builtin.command: swapoff /swap.img
-  when: "'/swap.img' in swap_status.stdout"
 
-- name: Check if swap entry exists in fstab
-  ansible.builtin.shell: grep -q "/swap.img" /etc/fstab
-  register: swap_entry_check
+- name: Check for swap entries in /etc/fstab
+  ansible.builtin.command: grep -E '^\s*[^#].*\sswap\s' /etc/fstab
+  register: fstab_swap
+  changed_when: false
   failed_when: false
+
+- name: Set fact if swap is enabled in /proc/swaps
+  ansible.builtin.set_fact:
+    swap_proc_enabled: "{{ proc_swaps.stdout_lines | length > 1 }}"
+
+- name: Set fact if swap is configured in /etc/fstab
+  ansible.builtin.set_fact:
+    swap_fstab_configured: "{{ fstab_swap.rc == 0 }}"
+
+- name: Determine overall swap status
+  ansible.builtin.set_fact:
+    swap_enabled: "{{ swap_proc_enabled or swap_fstab_configured }}"
+
+- name: Display swap status
+  ansible.builtin.debug:
+    msg:
+      - "Swap status from /proc/swaps: {{ 'Enabled' if swap_proc_enabled else 'Disabled' }}"
+      - "Swap configured in /etc/fstab: {{ 'Yes' if swap_fstab_configured else 'No' }}"
+      - "Overall swap status: {{ 'Enabled' if swap_enabled else 'Disabled' }}"
+
+- name: Disable all active swap
+  ansible.builtin.command: swapoff -a
+  when: swap_proc_enabled
+  register: swapoff_result
+  changed_when: swapoff_result.rc == 0
+
+- name: Comment out swap entries in /etc/fstab
+  ansible.builtin.replace:
+    path: /etc/fstab
+    regexp: '^([^#].*\sswap\s.*)'
+    replace: '# \1 # Commented out by Ansible'
+    backup: yes
+  when: swap_fstab_configured
+  register: fstab_result
+  changed_when: fstab_result.changed
+
+- name: Verify swap is disabled
+  ansible.builtin.command: cat /proc/swaps
+  register: verify_swaps
   changed_when: false
 
-- name: Comment out swap entry in fstab
-  ansible.builtin.lineinfile:
-    path: /etc/fstab
-    regexp: '^([^#].*\s+/swap.img\s+.*)'
-    backrefs: yes
-    line: '#\1'
-  register: fstab_status
-  when: swap_entry_check.rc == 0
-
-- name: Show changes made to fstab
+- name: Report swap disable status
   ansible.builtin.debug:
-    msg: "Changes were made to /etc/fstab"
-  when: fstab_status.changed | default(false)    
+    msg: "{{ 'Successfully disabled swap' if verify_swaps.stdout_lines | length <= 1 else 'Failed to disable swap completely' }}"
       
 - name: Check root account expiry settings
   ansible.builtin.command: chage -l root

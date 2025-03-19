@@ -16,7 +16,7 @@ ansible-galaxy install -r requirements.yml
 
 ### Running the playbook
 ```
-ansible-playbook playbooks.yml -e 'host=k8s_cluster' -i inv -v
+ansible-playbook playbooks.yml -e 'host=<IP>' -i inventory.yml -v
 ```
 
 ### Configuration Variables

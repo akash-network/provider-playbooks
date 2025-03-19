@@ -1,29 +1,12 @@
 all:
   hosts:
-    t100.abc.xy.akash.pub_node1:
+    node1.t100.abc.xy.akash.pub:
       ansible_host: <IP>
-      ip: <IP>
-      access_ip: <IP>
-    node2:
+    node2.t100.abc.xy.akash.pub:
       ansible_host: <IP>
-      ip: <IP>
-      access_ip: <IP>
-    node3:
+    node3.t100.abc.xy.akash.pub:
       ansible_host: <IP>
-      ip: <IP>
-      access_ip: <IP>
   children:
-    kube_control_plane:
-      hosts:
-        t100.abc.xy.akash.pub:
-    kube_node:
-      hosts:
-        node2:
-        node3:
     provider:
       hosts:
-        t100.abc.xy.akash.pub_node1:
-    k8s_cluster:
-      children:
-        kube_control_plane:
-        kube_node:
+        node1.t100.abc.xy.akash.pub:
