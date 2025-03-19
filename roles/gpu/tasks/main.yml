@@ -12,5 +12,3 @@
 - name: Apply the nvidia runtime and nvidia-device-plugin
   ansible.builtin.import_tasks: nvdp.yml
 
-- name: Disable auto updates
-  ansible.builtin.import_tasks: os_config.yml

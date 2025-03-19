@@ -1,2 +1,20 @@
 ---
 # defaults file for tailscale
+# Tailscale hostname for the node
+tailscale_hostname: ""
+# Register auth key to authenticate to Tailnet
+tailscale_authkey: ""
+# Additional command-line arguments for 'tailscale up'
+tailscale_args: "--auth-key={{ tailscale_authkey }} --hostname={{ tailscale_hostname }} --ssh"
+# Register as an ephemeral node
+tailscale_oauth_ephemeral: false
+# Manual Device approval
+tailscale_oauth_preauthorized: false
+# User supplied tags to node
+tailscale_tags: []
+# Skip Tailscale up
+tailscale_up_skip: false
+# Set timeout for 'tailscale up' command in seconds
+tailscale_up_timeout: "120"
+# Skip storing auth key in the state file
+tailscale_auth_key_in_state: false

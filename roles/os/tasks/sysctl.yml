@@ -1,0 +1,66 @@
+---
+- name: Create sysctl configuration file for Akash
+  ansible.builtin.copy:
+    dest: /etc/sysctl.d/90-akash.conf
+    content: |
+      # Common: tackle "failed to create fsnotify watcher: too many open files"
+      fs.inotify.max_user_instances = 512
+      fs.inotify.max_user_watches = 1048576
+
+      # Custom: increase memory mapped files limit to allow Solana node
+      # https://docs.solana.com/running-validator/validator-start
+      vm.max_map_count = 1000000
+
+- name: Apply sysctl parameters
+  ansible.builtin.command: sysctl -p /etc/sysctl.d/90-akash.conf
+
+- name: Find default route interface
+  ansible.builtin.shell: |
+    ip route get 8.8.8.8 | grep -oP "dev \K\w+" | head -n1
+  register: default_interface
+  changed_when: false
+
+- name: Get interface speed
+  ansible.builtin.shell: |
+    ethtool {{ default_interface.stdout }} 2>/dev/null | grep -oP "Speed: \K[0-9]+[GM]b/s" | grep -oP "[0-9]+"
+  register: speed_result
+  failed_when: false
+  changed_when: false
+
+- name: Get speed unit (G/M)
+  ansible.builtin.shell: |
+    ethtool {{ default_interface.stdout }} 2>/dev/null | grep -oP "Speed: [0-9]+\K[GM]b/s" | grep -oP "[GM]"
+  register: unit_result
+  failed_when: false
+  changed_when: false
+
+- name: Set high speed flag
+  ansible.builtin.set_fact:
+    is_high_speed: "{{ (unit_result.stdout == 'G' and speed_result.stdout|int >= 25) or unit_result.stdout == 'T' }}"
+  when: speed_result.rc == 0 and unit_result.rc == 0
+
+- name: Create custom network sysctl file for high-speed interfaces
+  ansible.builtin.copy:
+    dest: /etc/sysctl.d/99-custom-network.conf
+    content: |
+      # Allows full throughput for Ceph
+      net.core.netdev_budget=2000
+      net.core.netdev_budget_usecs=20000
+  when: is_high_speed is defined and is_high_speed|bool
+
+- name: Apply sysctl settings
+  ansible.builtin.command: sysctl --system
+  when: is_high_speed is defined and is_high_speed|bool
+
+- name: Create custom sysctl config file
+  ansible.builtin.copy:
+    content: "net.core.netdev_max_backlog=2000\n"
+    dest: /etc/sysctl.d/99-custom.conf
+    owner: root
+    group: root
+    mode: '0644'
+  register: sysctl_config
+    
+- name: Apply sysctl settings
+  ansible.builtin.command: sysctl -p /etc/sysctl.d/99-custom.conf
+  when: sysctl_config.changed  

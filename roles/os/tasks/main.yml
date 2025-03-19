@@ -1,0 +1,19 @@
+---
+# tasks file for OS
+- name: Do the required Prechecks
+  ansible.builtin.import_tasks: prereqs.yml
+
+- name: remove snap
+  ansible.builtin.import_tasks: remove_snap.yml
+
+- name: Apply sysctl settings
+  ansible.builtin.import_tasks: sysctl.yml
+
+- name: Log rotation
+  ansible.builtin.import_tasks: journal_cleanup.yml
+
+- name: Provider crons
+  ansible.builtin.import_tasks: provider_crons.yml
+
+- name: Disable autoupgrades
+  ansible.builtin.import_tasks: disable_upgrades.yml

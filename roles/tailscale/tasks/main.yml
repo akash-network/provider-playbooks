@@ -14,6 +14,7 @@
   ansible.builtin.import_tasks: uninstall.yml
   tags:
   - uninstall
+  when: tailscale_uninstall | default(false) | bool
 
 - name: Output node details
   ansible.builtin.import_tasks: output.yml

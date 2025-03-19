@@ -13,11 +13,11 @@ The repository is organized as follows:
 │   ├── provider/            # Provider-specific configurations
 │   ├── op/                  # 1Password integration
 │   ├── gpu/                 # GPU driver and runtime setup
-│   └── cron/                # Cron job configurations
+│   └── os/                  # sysctl, cron job configurations
 ├── host_vars/               # Host-specific variables
-├── playbooks.yaml           # Main playbook definitions
-├── inventory.yaml           # Inventory configuration
-└── inventory_example.yaml   # Example inventory structure
+├── playbooks.yml           # Main playbook definitions
+├── inventory.yml           # Inventory configuration
+└── inventory_example.yml   # Example inventory structure
 ```
 
 ## Prerequisites
@@ -92,7 +92,7 @@ Before submitting changes:
 - Update README.md for significant changes
 - Document new variables and their purposes
 - Include examples for new features
-- Update inventory_example.yaml if adding new host variables
+- Update inventory_example.yml if adding new host variables
 
 ## Commit Messages
 

@@ -1,0 +1,12 @@
+all:
+  hosts:
+    node1.t100.abc.xy.akash.pub:
+      ansible_host: <IP>
+    node2.t100.abc.xy.akash.pub:
+      ansible_host: <IP>
+    node3.t100.abc.xy.akash.pub:
+      ansible_host: <IP>
+  children:
+    provider:
+      hosts:
+        node1.t100.abc.xy.akash.pub:

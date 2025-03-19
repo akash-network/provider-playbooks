@@ -1,0 +1,99 @@
+---
+- name: Check swap status in /proc/swaps
+  ansible.builtin.command: cat /proc/swaps
+  register: proc_swaps
+  changed_when: false
+
+- name: Check for swap entries in /etc/fstab
+  ansible.builtin.command: grep -E '^\s*[^#].*\sswap\s' /etc/fstab
+  register: fstab_swap
+  changed_when: false
+  failed_when: false
+
+- name: Set fact if swap is enabled in /proc/swaps
+  ansible.builtin.set_fact:
+    swap_proc_enabled: "{{ proc_swaps.stdout_lines | length > 1 }}"
+
+- name: Set fact if swap is configured in /etc/fstab
+  ansible.builtin.set_fact:
+    swap_fstab_configured: "{{ fstab_swap.rc == 0 }}"
+
+- name: Determine overall swap status
+  ansible.builtin.set_fact:
+    swap_enabled: "{{ swap_proc_enabled or swap_fstab_configured }}"
+
+- name: Display swap status
+  ansible.builtin.debug:
+    msg:
+      - "Swap status from /proc/swaps: {{ 'Enabled' if swap_proc_enabled else 'Disabled' }}"
+      - "Swap configured in /etc/fstab: {{ 'Yes' if swap_fstab_configured else 'No' }}"
+      - "Overall swap status: {{ 'Enabled' if swap_enabled else 'Disabled' }}"
+
+- name: Disable all active swap
+  ansible.builtin.command: swapoff -a
+  when: swap_proc_enabled
+  register: swapoff_result
+  changed_when: swapoff_result.rc == 0
+
+- name: Comment out swap entries in /etc/fstab
+  ansible.builtin.replace:
+    path: /etc/fstab
+    regexp: '^([^#].*\sswap\s.*)'
+    replace: '# \1 # Commented out by Ansible'
+    backup: yes
+  when: swap_fstab_configured
+  register: fstab_result
+  changed_when: fstab_result.changed
+
+- name: Verify swap is disabled
+  ansible.builtin.command: cat /proc/swaps
+  register: verify_swaps
+  changed_when: false
+
+- name: Report swap disable status
+  ansible.builtin.debug:
+    msg: "{{ 'Successfully disabled swap' if verify_swaps.stdout_lines | length <= 1 else 'Failed to disable swap completely' }}"
+      
+- name: Check root account expiry settings
+  ansible.builtin.command: chage -l root
+  register: root_settings
+  changed_when: false
+
+- name: Display current root account settings
+  ansible.builtin.debug:
+    var: root_settings.stdout_lines
+
+- name: Verify root account never expires
+  ansible.builtin.fail:
+    msg: "Root account is set to expire! This doesn't meet our security requirements."
+  when: "root_settings.stdout is not regex('Account expires.*: never')"
+
+- name: Create custom SSH config file
+  ansible.builtin.copy:
+    content: |
+      # Disable password-based authentication
+      PasswordAuthentication no
+      # Allow root login using the public SSH key
+      PermitRootLogin prohibit-password
+    dest: /etc/ssh/sshd_config.d/99-akash.conf
+    owner: root
+    group: root
+    mode: '0644'
+  register: ssh_config_updated
+
+- name: Get SSH service name
+  ansible.builtin.shell: systemctl list-units --type=service | grep -E 'ssh[d]?' | awk '{print $1}' | sed 's/\.service//'
+  register: ssh_service_name
+  changed_when: false
+      
+- name: Reload SSH service
+  ansible.builtin.systemd:
+    name: "{{ ssh_service_name.stdout }}"
+    state: reloaded
+  when: ssh_config_updated.changed and ssh_service_name.stdout != ""
+
+- name: Install chrony
+  ansible.builtin.apt:
+    name: chrony
+    state: present
+    update_cache: yes  
