@@ -58,7 +58,7 @@ ansible-playbook playbooks.yml -i inventory.yml -t op,provider -v -e 'provider_n
 
 #### Configure GPU
 ```bash
-ansible-playbook -i inventory.yaml playbooks.yaml -t gpu -v -e "host=10.4.8.196"
+ansible-playbook -i inventory.yaml playbooks.yaml -t gpu -v -e "host=all"
 ```
 
 #### Common Options
