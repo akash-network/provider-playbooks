@@ -1,5 +1,6 @@
 ---
 - name: Check if provider vars file exists
+  become: false
   ansible.builtin.stat:
     path: /tmp/provider_vars_temp.txt
   delegate_to: localhost
@@ -11,6 +12,7 @@
   when: not provider_vars_file.stat.exists
 
 - name: Read provider variables from file
+  become: false
   ansible.builtin.slurp:
     src: "/tmp/provider_vars_temp.txt"
   delegate_to: localhost
@@ -29,6 +31,8 @@
       - "provider_b64_keysecret: {{ provider_b64_keysecret | default('Not defined') }}"
 
 - name: Clean up temporary YAML file
+  become: false
   ansible.builtin.file:
     path: "/tmp/provider_vars_temp.txt"
     state: absent
+  delegate_to: localhost

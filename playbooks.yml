@@ -9,13 +9,6 @@
   tags:
     - tailscale
 
-- name: Retrieve op items
-  hosts: localhost
-  roles:
-    - op
-  tags:
-    - op
-
 - name: Provider Playbook
   hosts: "{{ host }}"
   become: true
@@ -25,6 +18,13 @@
     - os
   tags:
     - os
+
+- name: Retrieve op items
+  hosts: localhost
+  roles:
+    - op
+  tags:
+    - op
 
 - name: Provider Playbook
   hosts: "{{ host }}" # The target should be usually on a node where kubectl talks to the API server.
