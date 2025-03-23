@@ -1,9 +1,0 @@
----
-# vars file for 1P
-provider_name: "h123.24t5.net"
-vault_name: "Providers"
-
-provider_b64_key_field: b64-key
-provider_b64_sec_field: b64-keysecret
-
-opconnect_account_name: my.1password.com
