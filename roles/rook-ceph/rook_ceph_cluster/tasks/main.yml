@@ -1,0 +1,11 @@
+---
+# Tasks for deploying the Rook-Ceph cluster
+- name: Include Rook-Ceph defaults
+  include_vars: "../rook-ceph-defaults.yml"
+
+- name: Deploy Rook-Ceph Operator
+  hosts: control_host
+  gather_facts: false
+  roles:
+    - role: rook-ceph/rook-ceph-operator
+

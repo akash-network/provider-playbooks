@@ -1,0 +1,13 @@
+cluster_configuration:
+  storage_hosts:
+    count: 1
+    node_names: [node1]
+  worker_nodes:
+    count: 5
+    node_names: [node1, node2, node3, node4, node5]
+  storage:
+    device_names: "sd*"
+    osds_per_device: 1
+    device_type: "ssd"
+  configuration:
+    zfs_for_ephemeral: "no"

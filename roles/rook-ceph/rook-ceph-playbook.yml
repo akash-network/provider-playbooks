@@ -1,0 +1,87 @@
+---
+# Playbook for deploying Rook-Ceph on Kubespray-deployed Kubernetes clusters
+#
+# This playbook deploys Rook-Ceph operator and creates a Ceph cluster on a
+# Kubernetes cluster deployed with Kubespray.
+#
+# Usage:
+#   ansible-playbook -i inventory/akash/hosts.yaml rook-ceph.yml
+#
+# Requirements:
+#   - A running Kubernetes cluster deployed with Kubespray
+#   - Raw, unformatted disks available on the nodes for Ceph to use
+#   - The devices to be used for Ceph OSDs should be specified in the inventory
+#     under the rook_ceph_osds variable or left empty for auto-discovery
+
+- name: Install Rook-Ceph Prerequisites
+  hosts: kube_control_plane
+  gather_facts: true
+  become: false
+  vars:
+    ansible_python_interpreter: /root/kubespray/venv/bin/python
+  environment:
+    PYTHONPATH: /root/kubespray/venv/lib/python3.12/site-packages
+
+
+  pre_tasks:
+    - name: Install kubernetes Python package
+      pip:
+        name: kubernetes
+        state: present
+        executable: /root/kubespray/venv/bin/pip
+      become: false
+
+  tags: ['rook', 'ceph', 'rook-ceph', 'rook-ceph-prereq']
+  tasks:
+    - name: Check Kubernetes cluster accessibility
+      kubernetes.core.k8s_info:
+        kind: Node
+      register: k8s_nodes
+      failed_when: k8s_nodes.resources | length == 0
+
+    - name: Check Kubernetes version
+      command: kubectl version -o json
+      register: k8s_version
+      failed_when: false
+
+    - name: Set Kubernetes version fact
+      set_fact:
+        k8s_server_version: "{{ (k8s_version.stdout | from_json).serverVersion.gitVersion | regex_replace('^v', '') }}"
+
+    - name: Verify Kubernetes version is compatible with Rook-Ceph
+      fail:
+       msg: "Kubernetes version {{ k8s_server_version }} is not compatible with Rook-Ceph. Minimum required version is 1.22.0"
+      when: k8s_server_version is version('1.22.0', '<', version_type='semver')
+
+
+    - name: Set default Rook-Ceph namespace
+      set_fact:
+        rook_ceph_namespace: "{{ rook_ceph_namespace | default('rook-ceph') }}"
+
+    - name: Set default Rook-Ceph version
+      set_fact:
+        rook_ceph_version: "{{ rook_ceph_version | default('v1.16.2') }}"
+
+- name: Add Rook Helm Repository
+  hosts: control_host
+  become: false
+  tasks:
+    - name: Add Rook Helm repository
+      shell: helm repo add rook-release https://charts.rook.io/release
+      register: helm_result
+      changed_when: helm_result.rc == 0
+      failed_when: helm_result.rc != 0
+
+    - name: Update Helm repositories (recommended after adding new repo)
+      shell: helm repo update
+      register: update_result
+      changed_when: update_result.rc == 0
+      failed_when: update_result.rc != 0
+
+- name: Deploy Rook-Ceph Operator
+  hosts: control_host
+  gather_facts: false
+  become: false
+  tags: ['rook', 'ceph', 'rook-ceph', 'rook-ceph-operator']
+  roles:
+    - role: rook_ceph_operator
