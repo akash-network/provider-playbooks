@@ -87,5 +87,5 @@ cluster_configuration:
 EOF
 
 echo -e "\nThank you for completing the questionnaire."
-echo "Your answers have been saved to ceph_answers.yaml"
+echo "Your answers have been saved to answers/ceph_answers.yaml"
 echo "You can review and edit this file if needed."

@@ -6,4 +6,3 @@ rook_ceph_version: "v1.16.2"
 
 # Namespace for Rook-Ceph installation
 rook_ceph_namespace: "rook-ceph"
-
