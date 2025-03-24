@@ -70,7 +70,7 @@ get_input "What type of storage devices will be used for persistent storage (hdd
 get_input "Do your worker nodes use ZFS for ephemeral storage (this is typically no)?" zfs_for_ephemeral
 
 # Write answers to YAML file
-cat > ceph_answers.yaml << EOF
+cat > answers/ceph_answers.yaml << EOF
 cluster_configuration:
   storage_hosts:
     count: $storage_host_count

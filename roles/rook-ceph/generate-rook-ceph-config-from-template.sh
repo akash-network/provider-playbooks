@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Hard-coded answers file
-ANSWERS_FILE="ceph_answers.yaml"
+ANSWERS_FILE="answers/ceph_answers.yaml"
 TEMPLATE_FILE="rook_ceph_cluster/templates/rook-ceph-cluster.values.tpl"
 OUTPUT_FILE="rook-ceph-cluster.values.yml"
 
@@ -36,9 +36,8 @@ echo "OSDs per device: $OSDS_PER_DEVICE"
 STORAGE_HOSTS_COUNT=$(grep "count:" "$ANSWERS_FILE" | head -1 | sed 's/.*count: *\([0-9]*\).*/\1/')
 echo "Storage hosts count: $STORAGE_HOSTS_COUNT"
 
-# Extract node names
-NODE_NAMES_LINE=$(grep "node_names:" "$ANSWERS_FILE" | head -1)
-NODE_NAMES=$(echo "$NODE_NAMES_LINE" | sed 's/.*node_names: *\[\([^]]*\)\].*/\1/' | sed 's/,/ /g')
+# Extract node names correctly
+NODE_NAMES=$(grep "storage_hosts:" -A 2 "$ANSWERS_FILE" | grep "node_names:" | sed -E 's/.*node_names:\s*\[(.*)\]/\1/' | tr ',' ' ' | tr -d '\n')
 echo "Node names: $NODE_NAMES"
 
 # Set storage class based on device type
@@ -50,10 +49,13 @@ elif [ "$DEVICE_TYPE" == "nvme" ]; then
 fi
 echo "Storage class: $STORAGE_CLASS"
 
-# Process device filter
-# Convert glob patterns like sd* to regex ^sd.
-DEVICE_FILTER=$(echo "$DEVICE_NAMES" | sed 's/\*/\./g' | sed 's/^/^/')
+# Process device filter: Append * if not present
+if [[ "$DEVICE_NAMES" == "nvme" && ! "$DEVICE_NAMES" =~ \*$ ]]; then
+    DEVICE_NAMES="${DEVICE_NAMES}*"
+fi
+DEVICE_FILTER=$(echo "$DEVICE_NAMES" | sed 's/\*/\*/g' | sed 's/^/^/')
 echo "Device filter: $DEVICE_FILTER"
+
 
 # Set failure domain, size and min_size based on storage hosts count
 FAILURE_DOMAIN="host"
@@ -70,12 +72,12 @@ echo "Failure domain: $FAILURE_DOMAIN"
 echo "Pool size: $POOL_SIZE"
 echo "Min size: $MIN_SIZE"
 
-# Generate node list for the configuration
+# Generate node list properly with correct indentation
 NODE_LIST=""
 for node in $NODE_NAMES; do
-    NODE_LIST+="  - name: \"$node\"\n    config:\n"
+    NODE_LIST="${NODE_LIST}    - name: \"$node\"\n      config: {}\n"
 done
-echo "Generated node list for $NODE_NAMES"
+echo -e "Generated node list:\n$NODE_LIST"
 
 # Create a temporary file with the template
 cp "$TEMPLATE_FILE" "$OUTPUT_FILE.tmp"
@@ -88,18 +90,10 @@ sed -i "s/{{ .OSDS_PER_DEVICE }}/$OSDS_PER_DEVICE/g" "$OUTPUT_FILE.tmp"
 sed -i "s/{{ .FAILURE_DOMAIN }}/$FAILURE_DOMAIN/g" "$OUTPUT_FILE.tmp"
 sed -i "s/{{ .STORAGE_CLASS }}/$STORAGE_CLASS/g" "$OUTPUT_FILE.tmp"
 
-# Handle node list replacement (this is a multi-line replacement)
-# We need to find the line containing {{ .NODE_LIST }} and replace it
-NODE_LIST_LINE=$(grep -n "{{ .NODE_LIST }}" "$OUTPUT_FILE.tmp" | cut -d ":" -f 1)
-if [ -n "$NODE_LIST_LINE" ]; then
-    # Delete the line with {{ .NODE_LIST }}
-    sed -i "${NODE_LIST_LINE}d" "$OUTPUT_FILE.tmp"
-    
-    # Insert the node list at the position
-    sed -i "${NODE_LIST_LINE}i$(echo -e "$NODE_LIST")" "$OUTPUT_FILE.tmp"
-fi
+# Properly replace NODE_LIST while preserving indentation
+awk -v nodes="$NODE_LIST" '{gsub("{{ .NODE_LIST }}", nodes)}1' "$OUTPUT_FILE.tmp" > "$OUTPUT_FILE"
 
-# Move the temp file to the final output
-mv "$OUTPUT_FILE.tmp" "$OUTPUT_FILE"
+# Remove the temporary file
+rm "$OUTPUT_FILE.tmp"
 
 echo "Configuration file generated at $OUTPUT_FILE"
