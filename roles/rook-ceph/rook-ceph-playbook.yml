@@ -94,3 +94,11 @@
   tags: ['rook-ceph', 'rook-ceph-cluster']
   roles:
     - role: rook_ceph_cluster
+
+- name: Finalize Rook-Ceph Setup
+  hosts: control_host
+  gather_facts: false
+  become: false
+  tags: ['rook-ceph', 'rook-ceph-finalize']
+  roles:
+    - rook_ceph_finalize
