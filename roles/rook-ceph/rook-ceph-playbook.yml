@@ -1,0 +1,104 @@
+---
+# rook-ceph-playbook.yml
+
+- name: Validate Kubernetes Cluster for Rook-Ceph
+  hosts: kube_control_plane
+  gather_facts: true
+  become: false
+  vars:
+    ansible_python_interpreter: /root/kubespray/venv/bin/python
+  environment:
+    PYTHONPATH: /root/kubespray/venv/lib/python3.12/site-packages
+  tags: ['rook-ceph', 'rook-ceph-prereq']
+  pre_tasks:
+    - name: Install Kubernetes Python package
+      pip:
+        name: kubernetes
+        state: present
+        executable: /root/kubespray/venv/bin/pip
+
+  tasks:
+    - name: Check Kubernetes cluster accessibility
+      kubernetes.core.k8s_info:
+        kind: Node
+      register: k8s_nodes
+      failed_when: k8s_nodes.resources | length == 0
+
+    - name: Get Kubernetes version
+      command: kubectl version -o json
+      register: k8s_version
+      changed_when: false
+      failed_when: false
+
+    - name: Set Kubernetes version fact
+      set_fact:
+        k8s_server_version: "{{ (k8s_version.stdout | from_json).serverVersion.gitVersion | regex_replace('^v', '') }}"
+
+    - name: Ensure Kubernetes version is compatible
+      fail:
+        msg: "Kubernetes version {{ k8s_server_version }} is not compatible with Rook-Ceph (min 1.22.0)"
+      when: k8s_server_version is version('1.22.0', '<', version_type='semver')
+
+    - name: Set Rook-Ceph defaults
+      set_fact:
+        rook_ceph_namespace: "{{ rook_ceph_namespace | default('rook-ceph') }}"
+        rook_ceph_version: "{{ rook_ceph_version | default('v1.16.2') }}"
+
+- name: Add and Update Helm Repository for Rook-Ceph
+  hosts: control_host
+  become: false
+  gather_facts: false
+  tags: ['rook-ceph', 'rook-ceph-helm']
+  tasks:
+    - name: Add Rook Helm repo
+      shell: helm repo add rook-release https://charts.rook.io/release
+      register: helm_result
+      changed_when: helm_result.rc == 0
+      failed_when: helm_result.rc != 0
+
+    - name: Update Helm repositories
+      shell: helm repo update
+      register: update_result
+      changed_when: update_result.rc == 0
+      failed_when: update_result.rc != 0
+
+- name: Deploy Rook-Ceph Operator
+  hosts: control_host
+  gather_facts: false
+  become: false
+  tags: ['rook-ceph', 'rook-ceph-operator']
+  roles:
+    - role: rook_ceph_operator
+
+- name: Ensure RBD kernel module is enabled on workers
+  hosts: worker_nodes
+  become: true
+  gather_facts: true
+  tags: ['rook-ceph', 'rook-ceph-rbd']
+  tasks:
+    - name: Ensure 'rbd' module is listed in /etc/modules
+      lineinfile:
+        path: /etc/modules
+        line: rbd
+        state: present
+
+    - name: Load the 'rbd' kernel module
+      modprobe:
+        name: rbd
+        state: present
+
+- name: Deploy Rook-Ceph Cluster
+  hosts: control_host
+  gather_facts: false
+  become: false
+  tags: ['rook-ceph', 'rook-ceph-cluster']
+  roles:
+    - role: rook_ceph_cluster
+
+- name: Finalize Rook-Ceph Setup
+  hosts: control_host
+  gather_facts: false
+  become: false
+  tags: ['rook-ceph', 'rook-ceph-finalize']
+  roles:
+    - rook_ceph_finalize

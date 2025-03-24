@@ -1,0 +1,22 @@
+[control_host]
+10.4.8.71
+
+[kube_control_plane]
+10.4.8.71
+
+[worker_nodes]
+10.4.8.71
+10.4.8.72
+10.4.8.73
+
+[all_hosts:children]
+control_host
+worker_nodes
+
+# Interpreter for each group
+
+[kube_control_plane:vars]
+ansible_python_interpreter=/root/akash-network/provider-playbooks/venv/bin/python3
+
+[worker_nodes:vars]
+ansible_python_interpreter=/usr/bin/python3
