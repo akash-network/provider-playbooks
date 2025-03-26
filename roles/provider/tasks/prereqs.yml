@@ -5,7 +5,8 @@
   failed_when: >
     remove_result.rc != 0 and 
     "Error: repository name (akash) not found" not in remove_result.stderr and
-    "Error: no repositories configured" not in remove_result.stderr
+    "Error: no repositories configured" not in remove_result.stderr and
+    "Error: no repo named \"akash\" found" not in remove_result.stderr
   changed_when: remove_result.rc == 0
 
 - name: Add required Helm repositories

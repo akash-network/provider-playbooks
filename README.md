@@ -12,16 +12,14 @@ This project tracks all tasks related to developing and maintaining custom Ansib
 - **Provider:** Deployment of Akash Provider.
 - **OS:** Sets up sysctl and cron jobs in the nodes.
 
-### To run the Ansible playbook
-```bash
-# Run the complete Ansible playbook
-ansible-playbook -i inventory.yml playbooks.yml -e "host=<IP>" -v
 
-# Run specific plays using tags
-# Available tags: op, provider, cron, gpu, tailscale
-ansible-playbook -i inventory.yml playbooks.yml -t <tag_name> -e "host=<IP>" -v
+### Installing Ansible
+Follow the below steps to install Ansible in the MacOS.
 ```
-
+python3 -m venv venv
+source venv/bin/activate
+pip3 install -r requirements.txt
+```
 
 ### Prerequisites
 Before running any Ansible playbooks, please ensure:
@@ -34,6 +32,16 @@ This setup ensures Ansible can communicate securely with all nodes in your infra
 
 **Note:**
 These Ansible playbooks have been tested on macOS and can be run from any macOS environment with Ansible installed. The *inventory.yml* file contains all target hosts where Ansible will deploy the configured tasks. Make sure this inventory file is properly configured with your server information before running any playbooks. The syntax remains the same on macOS as it would be on other UNIX-based systems.
+
+### To run the Ansible playbook
+```bash
+# Run the complete Ansible playbook
+ansible-playbook -i inventory.yml playbooks.yml -e "host=<IP>" -v
+
+# Run specific plays using tags
+# Available tags: op, provider, cron, gpu, tailscale
+ansible-playbook -i inventory.yml playbooks.yml -t <tag_name> -e "host=<IP>" -v
+```
 
 #### Deploy Tailscale
 ```bash
