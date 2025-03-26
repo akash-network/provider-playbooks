@@ -1,7 +1,7 @@
 ---
 # defaults file for provider
 node: "http://akash-node-1:26657"
-domain: "test.dsa.100.akash.pub"
+domain: "abc.xy.akash.pub"
 withdrawal_period: "12h"
 chain_id: "akashnet-2"
 cuda_version: 12.7
