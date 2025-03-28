@@ -22,6 +22,6 @@ ansible-playbook playbooks.yml -e 'host=<IP>' -i inventory.yml -v
 ### Configuration Variables
 | Variable                 | Description                                                      | Required | Default                |
 |--------------------------|------------------------------------------------------------------|----------|------------------------|
-| `install_dir`            | usually /root/<dir>, can be any directory - used to store files  | Yes      | /root/ansible.tmp      |
-| `nvidia_version`         | Nvidia Driver Version                                            | Yes      | 565.57.01              |
-| `gpu_nodes`              | list of nodes- used to apply the gpu labels                      | Yes      | [node1]                |
+| `install_dir`            | usually /root/<dir>, can be any directory - used to store files  | No       | /root/ansible.tmp      |
+| `nvidia_version`         | Nvidia Driver Version                                            | No       | 565.57.01              |
+| `gpu_nodes`              | list of nodes - used to apply the gpu labels                      | No       | [node1]                |

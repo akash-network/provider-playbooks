@@ -9,7 +9,7 @@
   tags:
     - tailscale
 
-- name: Provider Playbook
+- name: OS Playbook
   hosts: "{{ host }}"
   become: true
   become_user: root
@@ -19,7 +19,7 @@
   tags:
     - os
 
-- name: Retrieve op items
+- name: Retrieve OP items
   hosts: localhost
   roles:
     - op
