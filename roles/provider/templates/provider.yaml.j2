@@ -5,10 +5,9 @@ keysecret: "{{ provider_b64_keysecret }}"
 domain: "{{ domain }}"
 node: "{{ node }}"
 withdrawalperiod: "{{ withdrawal_period }}"
-chainid: "{{ chain_id }}"
+email: "{{ email }}"
+website: "{{ website }}"
 attributes:
-  - key: cuda
-    value: "{{ cuda_version }}"
   - key: region
     value: "{{ region }}"
   - key: host
@@ -17,49 +16,102 @@ attributes:
     value: "{{ tier }}"
   - key: organization
     value: "{{ organization }}"
+{% if cuda_version is defined and cuda_version %}
+  - key: cuda-version
+    value: "{{ cuda_version }}"
+{% endif %}
+{% if country is defined and country %}
   - key: country
     value: "{{ country }}"
+{% endif %}
+{% if city is defined and city %}
   - key: city
     value: "{{ city }}"
+{% endif %}
+{% if location_type is defined and location_type %}
   - key: location-type
     value: "{{ location_type }}"
-  - key: capabilities/cpu
+{% endif %}
+{% if cpu is defined and cpu %}
+  - key: cpu
     value: "{{ cpu }}"
-  - key: capabilities/cpu/arch
+{% endif %}
+{% if cpu_arch is defined and cpu_arch %}
+  - key: cpu-arch
     value: "{{ cpu_arch }}"
-  - key: capabilities/gpu
+{% endif %}
+{% if gpu is defined and gpu %}
+  - key: gpu
     value: "{{ gpu }}"
-  - key: capabilities/gpu/vendor/nvidia/model/a100
+{% endif %}
+{% if gpu_model_a100 is defined and gpu_model_a100 %}
+  - key: gpu-model-a100
     value: "{{ gpu_model_a100 }}"
-  - key: capabilities/gpu/vendor/nvidia/model/a100/ram/80Gi
-    value: {{ gpu_model_a100_ram_80 }}
-  - key: capabilities/gpu/vendor/nvidia/model/a100/ram/80Gi/interface/sxm
-    value: {{ gpu_model_a100_ram_sxm }}
-  - key: capabilities/gpu/vendor/nvidia/model/a100/interface/sxm
-    value: {{ gpu_model_a100_sxm }}
-  - key: capabilities/storage/1/class
-    value: {{ storage_one_class }}
-  - key: capabilities/storage/1/persistent
-    value: {{ storage_one_persistent }}
-  - key: capabilities/storage/2/class
-    value: {{ storage_two_class }}
-  - key: capabilities/storage/2/persistent
-    value: {{ storage_two_persistent }}
-  - key: capabilities/memory
-    value: {{ memory }}
+{% endif %}
+{% if gpu_model_a100_ram_80 is defined and gpu_model_a100_ram_80 %}
+  - key: gpu-model-a100-ram-80
+    value: "{{ gpu_model_a100_ram_80 }}"
+{% endif %}
+{% if gpu_model_a100_ram_sxm is defined and gpu_model_a100_ram_sxm %}
+  - key: gpu-model-a100-ram-sxm
+    value: "{{ gpu_model_a100_ram_sxm }}"
+{% endif %}
+{% if gpu_model_a100_sxm is defined and gpu_model_a100_sxm %}
+  - key: gpu-model-a100-sxm
+    value: "{{ gpu_model_a100_sxm }}"
+{% endif %}
+{% if storage_one_class is defined and storage_one_class %}
+  - key: storage-one-class
+    value: "{{ storage_one_class }}"
+{% endif %}
+{% if storage_one_persistent is defined and storage_one_persistent %}
+  - key: storage-one-persistent
+    value: "{{ storage_one_persistent }}"
+{% endif %}
+{% if storage_two_class is defined and storage_two_class %}
+  - key: storage-two-class
+    value: "{{ storage_two_class }}"
+{% endif %}
+{% if storage_two_persistent is defined and storage_two_persistent %}
+  - key: storage-two-persistent
+    value: "{{ storage_two_persistent }}"
+{% endif %}
+{% if memory is defined and memory %}
+  - key: memory
+    value: "{{ memory }}"
+{% endif %}
+{% if network_speed_up is defined and network_speed_up %}
   - key: network-speed-up
-    value: {{ network_speed_up }}
+    value: "{{ network_speed_up }}"
+{% endif %}
+{% if network_speed_down is defined and network_speed_down %}
   - key: network-speed-down
-    value: {{ network_speed_down }}
-email: hosting@ovrclk.com
-website: "{{ website }}"
-organization: "organization"
-price_target_cpu: "{{ price_cpu }}"
-price_target_memory: "{{ price_memory }}"
-price_target_hd_ephemeral: "{{ price_hd_ephemeral }}"
-price_target_hd_pers_hdd: "{{ price_hd_pers_hdd }}"
-price_target_hd_pers_ssd: "{{ price_hd_pers_ssd }}"
-price_target_hd_pers_nvme: "{{ price_hd_pers_nvme }}"
-price_target_endpoint: "{{ price_endpoint }}"
-price_target_ip: "{{ price_ip }}"
-price_target_gpu_mappings: "{{ price_gpu_mappings }}"
+    value: "{{ network_speed_down }}"
+{% endif %}
+{% if price_cpu is defined and price_cpu %}
+price_cpu: {{ price_cpu }}
+{% endif %}
+{% if price_memory is defined and price_memory %}
+price_memory: {{ price_memory }}
+{% endif %}
+{% if price_hd_ephemeral is defined and price_hd_ephemeral %}
+price_hd_ephemeral: {{ price_hd_ephemeral }}
+{% endif %}
+{% if price_hd_pers_hdd is defined and price_hd_pers_hdd %}
+price_hd_pers_hdd: {{ price_hd_pers_hdd }}
+{% endif %}
+{% if price_hd_pers_ssd is defined and price_hd_pers_ssd %}
+price_hd_pers_ssd: {{ price_hd_pers_ssd }}
+{% endif %}
+{% if price_hd_pers_nvme is defined and price_hd_pers_nvme %}
+price_hd_pers_nvme: {{ price_hd_pers_nvme }}
+{% endif %}
+{% if price_endpoint is defined and price_endpoint %}
+price_endpoint: {{ price_endpoint }}
+{% endif %}
+{% if price_ip is defined and price_ip %}
+price_ip: {{ price_ip }}
+{% endif %}
+{% if price_gpu_mappings is defined and price_gpu_mappings %}
+price_gpu_mappings: "{{ price_gpu_mappings }}"
+{% endif %}
