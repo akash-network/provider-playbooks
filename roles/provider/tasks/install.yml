@@ -16,15 +16,12 @@
     - name: lease
       labels:
         akash.network: 'true'
-  
+
 - name: Install Akash Helm charts
   kubernetes.core.helm:
     name: "{{ item.name }}"
     chart_ref: "akash/{{ item.chart }}"
     release_namespace: akash-services
-    release_values: "{{ item.values }}"
-    values:
-      image_tag: "{{ provider_version }}"
   loop:
     - name: akash-hostname-operator
       chart: akash-hostname-operator
@@ -71,8 +68,7 @@
     chart_ref: akash/provider
     release_namespace: akash-services
     values:
-      image_tag: "{{ provider_version }}"
-      bidpricescript: "{{ pricing_script_b64.stdout }}"      
+      bidpricescript: "{{ pricing_script_b64.stdout }}"
     values_files:
       - /root/provider/provider.yaml
 
