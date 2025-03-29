@@ -9,9 +9,10 @@ configOverride: |
 cephClusterSpec:
   resources:
   mon:
-    count: 1
+    count: {{ .MON_COUNT }}
   mgr:
-    count: 1
+    count: {{ .MGR_COUNT }}
+
   storage:
     useAllNodes: false
     useAllDevices: false

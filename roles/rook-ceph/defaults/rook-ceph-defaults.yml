@@ -1,8 +1,16 @@
----
-# Default values for Rook-Ceph deployment
+rook_ceph_namespace: rook-ceph
+rook_ceph_version: "1.16.2"
 
-# Version of Rook-Ceph to deploy (format: vX.Y.Z)
-rook_ceph_version: "v1.16.2"
-
-# Namespace for Rook-Ceph installation
-rook_ceph_namespace: "rook-ceph"
+ceph_cluster:
+  storage_hosts:
+    count: 3
+    node_names: [node1, node2, node3]
+  worker_nodes:
+    count: 3
+    node_names: [node1, node2, node3]
+  storage:
+    device_names: "sd*"
+    osds_per_device: 1
+    device_type: "ssd"
+  configuration:
+    zfs_for_ephemeral: "no"

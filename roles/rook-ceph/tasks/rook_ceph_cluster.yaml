@@ -1,11 +1,14 @@
+---
 - name: Install Rook-Ceph Cluster via Helm CLI
   shell: >
-    helm install --create-namespace -n {{ rook_ceph_namespace }}
+    helm upgrade --install -n {{ rook_ceph_namespace }}
     rook-ceph-cluster rook-release/rook-ceph-cluster
     --version {{ rook_ceph_version }}
-    -f {{ playbook_dir }}/rook-ceph-cluster.values.yml
+    -f {{ role_path }}/rook-ceph-cluster.values.yml
   args:
     executable: /bin/bash
   register: helm_cluster_result
   changed_when: "'installed' in helm_cluster_result.stdout or 'deployed' in helm_cluster_result.stdout"
   failed_when: helm_cluster_result.rc != 0
+  delegate_to: localhost
+  run_once: true
