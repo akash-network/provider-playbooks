@@ -1,0 +1,10 @@
+---
+## These tasks need to be completed in order for the rook-ceph to be operational
+- name: Install Rook-CEPH Operator
+  ansible.builtin.import_tasks: rook_ceph_operator.yaml
+
+- name: Install Rook-CEPH Cluster
+  ansible.builtin.import_tasks: rook_ceph_cluster.yaml
+
+- name: Finishing tasks
+  ansible.builtin.import_tasks: rook_ceph_finalize.yaml
