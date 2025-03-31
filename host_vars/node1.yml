@@ -1,0 +1,23 @@
+# Node Configuration - Host Vars File
+
+## Provider Identification
+akash1_address: ""  # Your Akash wallet address
+
+## Security Credentials
+provider_b64_key: ""        # Base64-encoded provider key
+provider_b64_keysecret: ""  # Base64-encoded provider key secret
+
+## Network Configuration
+domain: ""                # Domain name
+region: ""                # Region name
+
+## Organization Details
+host: ""          # Provider node hostname
+organization: ""  # Your organization name
+email: ""         # Contact email address
+website: ""       # Organization website
+
+## Notes:
+# - Replace empty values with your actual configuration
+# - Keep sensitive values secure and never share them publicly
+# - Ensure domain format follows Akash naming conventions

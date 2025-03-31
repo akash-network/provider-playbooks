@@ -2,14 +2,8 @@
 # defaults file for provider
 node: "http://akash-node-1:26657"
 provider_version: "0.6.9"
-domain: "abc.xy.akash.pub"
 withdrawal_period: "12h"
-region: "us-central"
-host: "akash"
 tier: "community"
-organization: "overclock"
-email: "hosting@ovrclk.com"
-website: "https://akash.network"
 
 # price targets
 price_cpu: 1.60
