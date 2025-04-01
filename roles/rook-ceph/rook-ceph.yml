@@ -1,3 +1,6 @@
 ---
-- name: Install Kubernetes
-  ansible.builtin.import_playbook: playbooks/rook-ceph-playbook.yml
+- name: Deploy Rook Ceph
+  hosts: all
+  become: true
+  roles:
+    - role: rook-ceph
