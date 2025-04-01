@@ -1,12 +1,4 @@
 ---
-- name: Install NVIDIA Container Toolkit and Runtime
-  ansible.builtin.apt:
-    name:
-      - nvidia-container-toolkit
-      - nvidia-container-runtime
-    state: present
-    update_cache: yes
-
 - name: Check if NVIDIA runtime configuration file exists
   ansible.builtin.stat:
     path: "{{ cruntime_toml_path }}"
