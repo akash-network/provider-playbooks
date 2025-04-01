@@ -51,13 +51,87 @@ git clone -b v2.24.1 --depth=1 https://github.com/kubernetes-sigs/kubespray.git
 
 #### STEP 2 - Install Ansible
 ```bash
+apt-get update -y
+apt install -y python3-virtualenv
+apt install -y python3-pip
 cd ~/kubespray
 virtualenv --python=python3 venv
 source venv/bin/activate
 pip3 install -r requirements.txt
 ```
 
-#### STEP 3 - Clone the Provider Playbooks Repository
+#### STEP 3 - Ansible Access to Kubernetes Cluster
+
+Ansible will configure the Kubernetes hosts via SSH. The user Ansible connects with must be root or have the capability of escalating privileges to root.
+
+Commands in this step provide an example of SSH configuration and access to Kubernetes hosts and testing those connections.
+
+#### Section Overview
+
+The command sets provided in this section may be copied and pasted into your terminal without edit unless otherwise noted.
+
+#### **Create SSH Keys on Ansible Host**
+
+- Accept the defaults to create a public-private key pair
+
+```
+ssh-keygen -t rsa -C $(hostname) -f "$HOME/.ssh/id_rsa" -P "" ; cat ~/.ssh/id_rsa.pub
+```
+
+#### **Confirm SSH Keys**
+
+- The keys will be stored in the user’s home directory
+- Use these commands to verify keys
+
+```
+cd ~/.ssh ; ls
+```
+
+##### **Example files created**
+
+```
+authorized_keys  id_rsa  id_rsa.pub
+```
+
+#### **Copy Public Key to the Kubernetes Hosts**
+
+#### **Template**
+
+- Replace the username and IP address variables in the template with your own settings. Refer to the Example for further clarification.
+
+```
+ssh-copy-id -i ~/.ssh/id_rsa.pub <username>@<ip-address>
+```
+
+#### **Example**
+
+- Conduct this step for every Kubernetes control plane and worker node in the cluster
+
+```
+ssh-copy-id -i ~/.ssh/id_rsa.pub root@10.88.94.5
+```
+
+#### **Confirm SSH to the Kubernetes Hosts**
+
+- Ansible should be able to access all Kubernetes hosts with no password
+
+#### **Template**
+
+- Replace the username and IP address variables in the template with your own settings. Refer to the Example for further clarification.
+
+```
+ssh -i ~/.ssh/id_rsa <username>@<ip-address>
+```
+
+#### **Example**
+
+- Conduct this access test for every Kubernetes control plane and worker node in the cluster
+
+```
+ssh -i ~/.ssh/id_rsa root@10.88.94.5
+```
+
+#### STEP 4 - Clone the Provider Playbooks Repository
 ```bash
 cd ~
 git clone https://github.com/akash-network/provider-playbooks.git
@@ -85,7 +159,7 @@ cat /root/kubespray/cluster.yml
   import_playbook: ../provider-playbooks/playbooks.yml
 ```
 
-#### STEP 4 - Ansible Inventory
+#### STEP 5 - Ansible Inventory
 ```bash
 cd ~/kubespray
 
@@ -204,7 +278,7 @@ Use these resources for a more through understanding of Kubespray and for troubl
 - [Adding/replacing a node](https://github.com/kubernetes-sigs/kubespray/blob/9dfade5641a43c/docs/nodes.md)
 - [Upgrading Kubernetes in Kubespray](https://github.com/kubernetes-sigs/kubespray/blob/e9c89132485989/docs/upgrades.md)
 
-#### STEP 5 - Configure Ephemeral Storage
+#### STEP 6 - Configure Ephemeral Storage
 The cluster specific variables can be defined in the group vars and they are located here */root/kubespray/inventory/akash/group_vars//k8s_cluster/k8s-cluster.yml*. Ensure your provider is configured to offer more ephemeral storage compared to the root volume by modifying group_vars/k8s_cluster/k8s-cluster.yml on the Kubespray host.
 
 ```bash
@@ -219,7 +293,7 @@ containerd_storage_dir: "/data/containerd"
 kubelet_custom_flags: "--root-dir=/data/kubelet"
 ```
 
-#### STEP 6 - Configure Scheduler Profiles
+#### STEP 7 - Configure Scheduler Profiles
 Add the following configuration to */root/kubespray/inventory/akash/group_vars/k8s_cluster/k8s-cluster.yml*:
 
 ```bash
@@ -245,7 +319,7 @@ kube_scheduler_profiles:
               weight: 1
 ```
 
-#### STEP 7 - Enable Helm Installation
+#### STEP 8 - Enable Helm Installation
 Add the following configuration to */root/kubespray/inventory/akash/group_vars/k8s_cluster/addons.yml*:
 ```bash
 vi /root/kubespray/inventory/akash/group_vars/k8s_cluster/addons.yml
@@ -256,7 +330,7 @@ vi /root/kubespray/inventory/akash/group_vars/k8s_cluster/addons.yml
 helm_enabled: true
 ```
 
-#### STEP 8 - DNS Configuration
+#### STEP 9 - DNS Configuration
 
 #### Upstream DNS Servers
 
@@ -303,7 +377,7 @@ upstream_dns_servers:
 It is best to use two different DNS nameserver providers as in this example - Google DNS (8.8.8.8) and Cloudflare (1.1.1.1).
 
 
-#### STEP 8 - Host vars creation for Provider Deployment
+#### STEP 10 - Host vars creation for Provider Deployment
 Create host_vars file for each node defined in your kubespray hosts.yaml file. The host_vars files contain the configuration specific to each node in your Akash provider setup.
 
 1) Create a host_vars file for each node in your /root/provider-playbooks/host_vars directory
@@ -328,8 +402,8 @@ provider_b64_key: ""        # Base64-encoded provider key
 provider_b64_keysecret: ""  # Base64-encoded provider key secret
 
 ## Network Configuration
-domain: t100.abc.xy.akash.pub
-region: "us-central"
+domain: ""          # Publicly accessible DNS name dedicated for your provider, e.g. "t100.abc.xy.akash.pub"
+region: ""          # Set your region here, e.g. "us-west"
 
 ## Organization Details
 host: ""          # Provider node hostname
@@ -343,6 +417,8 @@ website: ""       # Organization website
 # - Ensure domain format follows Akash naming conventions
 EOF
 ```
+> NOTE: provider_b64_key and provider_b64_keysecret can be passed as a host_var. For better security, we recommend passing `provider_b64_key` and `provider_b64_keysecret` as runtime variables with the `-e` flag (e.g., `ansible-playbook main.yml -e "host=all provider_b64_key=VALUE provider_b64_keysecret=VALUE"`) rather than storing them in host_vars files. This prevents credentials from being saved to disk in plain text.
+
 #### Important Notes
 
 - Create a separate .yml file for each node in your cluster
@@ -350,7 +426,7 @@ EOF
 - You'll fill in the empty values after generating keys and certificates
 - For multi-node deployments, repeat this process with appropriate values for each node
 
-#### STEP 9 - Running the Ansible Playbook
+#### STEP 11 - Running the Ansible Playbook
 
 Deploy your Akash Provider by running the Ansible playbook:
 
