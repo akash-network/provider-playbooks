@@ -6,6 +6,17 @@
   delegate_to: localhost
   register: provider_vars_file
 
+- name: Check if node has control-plane label
+  ansible.builtin.shell: kubectl get node {{ inventory_hostname }} --no-headers -o custom-columns=LABELS:.metadata.labels | grep -q 'node-role.kubernetes.io/control-plane\|node-role.kubernetes.io/master'
+  register: control_plane_check
+  failed_when: false
+  changed_when: false
+
+- name: Fail if not a control plane node
+  ansible.builtin.fail:
+    msg: "This task can only be run on a Kubernetes control plane node"
+  when: control_plane_check.rc != 0
+
 - name: Check if provider keys are passed as variables
   ansible.builtin.set_fact:
     provider_keys_passed: "{{ provider_b64_key is defined and provider_b64_keysecret is defined }}"
