@@ -15,7 +15,34 @@
   ansible.builtin.set_fact:
     current_driver_version: "{{ nvidia_driver_check.stdout | default('') }}"
 
-- name: Fail if driver is already at the required version
+- name: Check if nvidia-container-toolkit is installed (Debian/Ubuntu)
+  ansible.builtin.command: dpkg -l nvidia-container-toolkit
+  register: toolkit_check
+  changed_when: false
+  failed_when: false
+
+- name: Check if nvidia-container-runtime is installed (Debian/Ubuntu)
+  ansible.builtin.command: dpkg -l nvidia-container-runtime
+  register: runtime_check
+  changed_when: false
+  failed_when: false
+
+- name: Check if driver is already at the required version
+  ansible.builtin.debug:
+    msg:
+      - "nvidia-container-toolkit installed: {{ toolkit_check.rc == 0 }}"
+      - "nvidia-container-runtime installed: {{ runtime_check.rc == 0 }}"
+
+- name: Install NVIDIA Container Toolkit and Runtime
+  ansible.builtin.apt:
+    name:
+      - nvidia-container-toolkit
+      - nvidia-container-runtime
+    state: present
+    update_cache: yes
+  when: (toolkit_check.rc != 0 or runtime_check.rc != 0)
+
+- name: Check if driver is already at the required version
   ansible.builtin.fail:
     msg: "NVIDIA driver is already at version {{ current_driver_version }}. No action required."
   when: current_driver_version == nvidia_version

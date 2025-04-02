@@ -1,9 +1,0 @@
-akash1_address: "" # REDACTED
-provider_b64_key: "" # REDACTED
-provider_b64_keysecret: "" # REDACTED
-domain: t100.abc.xy.akash.pub
-tailscale_hostname: "node1-t100-abc-xy-akash-pub"
-city: abc
-storage_one_class: false
-storage_one_persistent: false
-storage_two_persistent: false

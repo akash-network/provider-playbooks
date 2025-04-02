@@ -45,27 +45,102 @@ This guide walks you through the process of building an Akash Provider using Ans
 
 #### STEP 1 - Clone the Kubespray Repository
 ```bash
-root@node1:~# cd ~
-root@node1:~# git clone -b v2.24.1 --depth=1 https://github.com/kubernetes-sigs/kubespray.git
+cd ~
+git clone -b v2.26.0 --depth=1 https://github.com/kubernetes-sigs/kubespray.git
 ```
 
 #### STEP 2 - Install Ansible
 ```bash
-root@node1:~# cd ~/kubespray
-root@node1:~# virtualenv --python=python3 venv
-root@node1:~# source venv/bin/activate
-(venv) root@node1:~# pip3 install -r requirements.txt
+apt-get update -y
+apt install -y python3-virtualenv
+apt install -y python3-pip
+cd ~/kubespray
+virtualenv --python=python3 venv
+source venv/bin/activate
+pip3 install -r requirements.txt
+pip3 install ruamel.yaml
 ```
 
-#### STEP 3 - Clone the Provider Playbooks Repository
+#### STEP 3 - Ansible Access to Kubernetes Cluster
+
+Ansible will configure the Kubernetes hosts via SSH. The user Ansible connects with must be root or have the capability of escalating privileges to root.
+
+Commands in this step provide an example of SSH configuration and access to Kubernetes hosts and testing those connections.
+
+#### Section Overview
+
+The command sets provided in this section may be copied and pasted into your terminal without edit unless otherwise noted.
+
+#### **Create SSH Keys on Ansible Host**
+
+- Accept the defaults to create a public-private key pair
+
+```
+ssh-keygen -t rsa -C $(hostname) -f "$HOME/.ssh/id_rsa" -P "" ; cat ~/.ssh/id_rsa.pub
+```
+
+#### **Confirm SSH Keys**
+
+- The keys will be stored in the user’s home directory
+- Use these commands to verify keys
+
+```
+cd ~/.ssh ; ls
+```
+
+##### **Example files created**
+
+```
+authorized_keys  id_rsa  id_rsa.pub
+```
+
+#### **Copy Public Key to the Kubernetes Hosts**
+
+#### **Template**
+
+- Replace the username and IP address variables in the template with your own settings. Refer to the Example for further clarification.
+
+```
+ssh-copy-id -i ~/.ssh/id_rsa.pub <username>@<ip-address>
+```
+
+#### **Example**
+
+- Conduct this step for every Kubernetes control plane and worker node in the cluster
+
+```
+ssh-copy-id -i ~/.ssh/id_rsa.pub root@10.88.94.5
+```
+
+#### **Confirm SSH to the Kubernetes Hosts**
+
+- Ansible should be able to access all Kubernetes hosts with no password
+
+#### **Template**
+
+- Replace the username and IP address variables in the template with your own settings. Refer to the Example for further clarification.
+
+```
+ssh -i ~/.ssh/id_rsa <username>@<ip-address>
+```
+
+#### **Example**
+
+- Conduct this access test for every Kubernetes control plane and worker node in the cluster
+
+```
+ssh -i ~/.ssh/id_rsa root@10.88.94.5
+```
+
+#### STEP 4 - Clone the Provider Playbooks Repository
 ```bash
-(venv) root@node1:~# cd ~
-(venv) root@node1:~# git clone https://github.com/akash-network/provider-playbooks.git
+cd ~
+git clone https://github.com/akash-network/provider-playbooks.git
 ```
 
 Append the provider-playbook in the cluster.yml
 ```bash
-(venv) root@node1:~# cat >> /root/kubespray/cluster.yml << EOF
+cat >> /root/kubespray/cluster.yml << EOF
   tags: kubespray
 
 - name: Run Akash provider setup
@@ -75,7 +150,7 @@ EOF
 
 ***Verify:***
 ```bash
-(venv) root@node1:~# cat /root/kubespray/cluster.yml
+cat /root/kubespray/cluster.yml
 ---
 - name: Install Kubernetes
   ansible.builtin.import_playbook: playbooks/cluster.yml
@@ -85,19 +160,20 @@ EOF
   import_playbook: ../provider-playbooks/playbooks.yml
 ```
 
-#### STEP 4 - Ansible Inventory
+#### STEP 5 - Ansible Inventory
+#### Single Node Cluster
 ```bash
-(venv) root@node1:~# cd ~/kubespray
+cd ~/kubespray
 
-(venv) root@node1:~# cp -rfp inventory/sample inventory/akash
+cp -rfp inventory/sample inventory/akash
 
 #REPLACE IP ADDRESSES BELOW WITH YOUR KUBERNETES CLUSTER IP ADDRESSES
-(venv) root@node1:~# declare -a IPS=(10.4.8.196)
+declare -a IPS=(10.4.8.196)
 
-(venv) root@node1:~# CONFIG_FILE=inventory/akash/hosts.yaml python3 contrib/inventory_builder/inventory.py ${IPS[@]}
-
-#### **Expected Result(Example)**
+CONFIG_FILE=inventory/akash/hosts.yaml python3 contrib/inventory_builder/inventory.py ${IPS[@]}
 ```
+#### **Expected Result(Example)**
+```bash
 (venv) root@node1:~/kubespray# CONFIG_FILE=inventory/akash/hosts.yaml python3 contrib/inventory_builder/inventory.py ${IPS[@]}
 DEBUG: Adding group all
 DEBUG: Adding group kube_control_plane
@@ -109,6 +185,39 @@ DEBUG: adding host node1 to group all
 DEBUG: adding host node1 to group etcd
 DEBUG: adding host node1 to group kube_control_plane
 DEBUG: adding host node1 to group kube_node
+```
+
+#### Multi Node Cluster
+```bash
+cp -rfp inventory/sample inventory/akash
+
+#REPLACE IP ADDRESSES BELOW WITH YOUR KUBERNETES CLUSTER IP ADDRESSES
+declare -a IPS=(10.0.10.136 10.0.10.239 10.0.10.253 10.0.10.9)
+
+CONFIG_FILE=inventory/akash/hosts.yaml python3 contrib/inventory_builder/inventory.py ${IPS[@]}```
+```
+
+#### **Expected Result(Example)**
+```bash
+DEBUG: Adding group all
+DEBUG: Adding group kube_control_plane
+DEBUG: Adding group kube_node
+DEBUG: Adding group etcd
+DEBUG: Adding group k8s_cluster
+DEBUG: Adding group calico_rr
+DEBUG: adding host node1 to group all
+DEBUG: adding host node2 to group all
+DEBUG: adding host node3 to group all
+DEBUG: adding host node4 to group all
+DEBUG: adding host node1 to group etcd
+DEBUG: adding host node2 to group etcd
+DEBUG: adding host node3 to group etcd
+DEBUG: adding host node1 to group kube_control_plane
+DEBUG: adding host node2 to group kube_control_plane
+DEBUG: adding host node1 to group kube_node
+DEBUG: adding host node2 to group kube_node
+DEBUG: adding host node3 to group kube_node
+DEBUG: adding host node4 to group kube_node
 ```
 
 #### **Verification of Generated File**
@@ -123,9 +232,9 @@ DEBUG: adding host node1 to group kube_node
 vi ~/kubespray/inventory/akash/hosts.yaml
 ```
 
-##### **Example hosts.yaml File**
+##### Example hosts.yaml File
 
-- Additional hosts.yaml examples, based on different Kubernetes cluster topologies, may be found [here](/docs/providers/build-a-cloud-provider/kubernetes-cluster-for-akash-providers/additional-k8s-resources/#kubespray-hostsyaml-examples)
+- Additional hosts.yaml examples, based on different Kubernetes cluster topologies, may be found [here](/Docs/providers/build-a-cloud-provider/akash-cli/kubernetes-cluster-for-akash-providers/additional-k8s-resources/index.md#kubespray-hostsyaml-examples)
 
 ```yml
 all:
@@ -204,16 +313,28 @@ Use these resources for a more through understanding of Kubespray and for troubl
 - [Adding/replacing a node](https://github.com/kubernetes-sigs/kubespray/blob/9dfade5641a43c/docs/nodes.md)
 - [Upgrading Kubernetes in Kubespray](https://github.com/kubernetes-sigs/kubespray/blob/e9c89132485989/docs/upgrades.md)
 
-#### STEP 5 - Configure Ephemeral Storage
-The cluster specific variables can be defined in the group vars and they are located here `/root/kubespray/inventory/akash/group_vars`. Ensure your provider is configured to offer more ephemeral storage compared to the root volume by modifying group_vars/k8s_cluster/k8s-cluster.yml on the Kubespray host.
+#### STEP 6 - Configure Ephemeral Storage
+The cluster specific variables can be defined in the group vars and they are located here */root/kubespray/inventory/akash/group_vars//k8s_cluster/k8s-cluster.yml*. Ensure your provider is configured to offer more ephemeral storage compared to the root volume by modifying group_vars/k8s_cluster/k8s-cluster.yml on the Kubespray host.
+
+```bash
+nano /root/kubespray/inventory/akash/group_vars/k8s_cluster/k8s-cluster.yml
+```
+
+
+And add these lines
 
 ```bash
 containerd_storage_dir: "/data/containerd"
 kubelet_custom_flags: "--root-dir=/data/kubelet"
 ```
 
-#### STEP 6 - Configure Scheduler Profiles
-Add the following configuration to group_vars/k8s_cluster/k8s-cluster.yml:
+#### STEP 7 - Configure Scheduler Profiles
+Add the following configuration to */root/kubespray/inventory/akash/group_vars/k8s_cluster/k8s-cluster.yml*:
+
+```bash
+nano /root/kubespray/inventory/akash/group_vars/k8s_cluster/k8s-cluster.yml
+```
+
 
 ```yml
 kube_scheduler_profiles:
@@ -233,17 +354,20 @@ kube_scheduler_profiles:
               weight: 1
 ```
 
-### STEP 7 - Enable Helm Installation
-Add the following configuration to group_vars/k8s_cluster/addson.yml:
+#### STEP 8 - Enable Helm Installation
+Add the following configuration to */root/kubespray/inventory/akash/group_vars/k8s_cluster/addons.yml*:
+```bash
+vi /root/kubespray/inventory/akash/group_vars/k8s_cluster/addons.yml
+```
 
 ```yml
 # Helm deployment
 helm_enabled: true
 ```
 
-## STEP 8 - DNS Configuration
+#### STEP 9 - DNS Configuration
 
-### Upstream DNS Servers
+#### Upstream DNS Servers
 
 Add `upstream_dns_servers` in your Ansible inventory
 
@@ -287,54 +411,230 @@ upstream_dns_servers:
 
 It is best to use two different DNS nameserver providers as in this example - Google DNS (8.8.8.8) and Cloudflare (1.1.1.1).
 
+## STEP 10 - Export Provider Wallet
 
-#### STEP 8 - Host vars creation for Provider Deployment
-Based on the host keys under `hosts` that was defined in the STEP 4 Example (`/root/kubespray/inventory/akash/hosts.yaml )`, create the host_vars file in `/root/provider-playbooks/host_vars`
+In this section we will export the pre-existing, funded wallet to store the private key in a local file. To conduct the commands in this section the Akash CLI must be installed which is detailed in this [guide ](/docs/deployments/akash-cli/installation/)(STEP 1 only).
 
-```bash
-(venv) root@node1:~# cat >> /root/provider-playbooks/host_vars/node1.yml << EOF
-akash1_address: "<PLACEHOLDER>"
-provider_b64_key: "<PLACEHOLDER>"
-provider_b64_keysecret: "<PLACEHOLDER>"
-domain: t100.abc.xy.akash.pub
-tailscale_hostname: "node1-t100-abc-xy-akash-pub"
-city: abc
-EOF
+The wallet used will be used for the following purposes:
+
+- Pay for provider transaction gas fees
+- Pay for bid collateral which is discussed further in this section
+
+> Make sure to create a new Akash account for the provider and do not reuse an account used for deployment purposes. Bids will not be generated from your provider if the deployment orders are created with the same key as the provider.
+
+### List Available Keys
+
+- Print the key names available in the local OS keychain for use in the subsequent step
+
+```
+provider-services keys list
 ```
 
-## STEP 9 - Running the Ansible Playbook
+#### Example/Expected Output
 
-Run the complete Ansible playbook with the necessary variables:
+> _**NOTE**_ - in this example the provider key name is `default` and this key name will be used in the subsequent sections of this documentation. Please adjust the key nane as necessary to suit your needs and preferences.
+
+```
+provider-services keys list
+- name: ""
+  type: local
+  address: akash1<redacted>
+  pubkey: '{"@type":"/cosmos.crypto.secp256k1.PubKey","key":"<redacted>"}'
+  mnemonic: ""
+- name: default
+  type: local
+  address: akash1<redacted>
+  pubkey: '{"@type":"/cosmos.crypto.secp256k1.PubKey","key":"<redacted>"}'
+  mnemonic: ""
+```
+
+### **Export Private Key to Local File**
+
+- The key-name can be any name of your choice
+- Note the passphrase used to protect the private key as it will be used in future steps
+
+> _**NOTE**_ - The passhprase MUST be at least 8 characters long. Otherwise provider will encounter `failed to decrypt private key: ciphertext decryption failed error` when `keys import` is executed.
+
+#### STEP 1 - Export Provider Key
+
+```
+cd ~
+
+provider-services keys export default
+```
+
+##### Expected/Example Output
+
+```
+provider-services keys export default
+
+Enter passphrase to encrypt the exported key:
+Enter keyring passphrase:
+-----BEGIN TENDERMINT PRIVATE KEY-----
+kdf: bcrypt
+salt: REDACTED
+type: secp256k1
+
+REDACTED
+-----END TENDERMINT PRIVATE KEY-----
+```
+
+#### STEP 2 - Create key.pem and Copy Output Into File
+
+- Create a `key.pem` file
+
+```
+cd ~
+
+vim key.pem
+```
+
+- Copy the output of the prior command (`provider-services keys export default`) into the `key.pem` file
+
+> _**NOTE -**_ file should contain only what's between `-----BEGIN TENDERMINT PRIVATE KEY-----` and `-----END TENDERMINT PRIVATE KEY-----` (including the `BEGIN` and `END` lines):
+
+##### Example/Expected File Contents
+
+```
+cat key.pem
+-----BEGIN TENDERMINT PRIVATE KEY-----
+kdf: bcrypt
+salt: REDACTED
+type: secp256k1
+
+REDACTED
+-----END TENDERMINT PRIVATE KEY-----
+```
+
+To get the provider_b64_key & provider_b64_keysecret you need to base64 encode your provider's key & the password it is protected with (you only set it when you export it).
+
+> Note: Replace KEY_PASSWORD with the password you have entered upon provider-services keys export > key.pem !
+```bash
+# This would be the value of provider_b64_key in the next step
+cat ~/key.pem | openssl base64 -A ; echo
+# This would be the value of provider_b64_keysecret in the next step
+echo "KEY_PASSWORD" | openssl base64 -A; echo
+```
+
+#### STEP 11 - Host vars creation for Provider Deployment
+Create host_vars file `node1.yaml`. The naming must match the name defined in your kubespray hosts.yaml file. The host_vars files contain the configuration specific to each node in your Akash provider setup.
+
+1) Create a host_vars file for each node in your /root/provider-playbooks/host_vars directory
+2) Use the same hostname as defined in your hosts.yaml file from Step 4
+
+
+Based on the host keys under `hosts` that was defined in the STEP 4 Example (`/root/kubespray/inventory/akash/hosts.yml )`, create the host_vars file in `/root/provider-playbooks/host_vars`
+
+```bash
+# Create the host_vars directory if it doesn't exist
+mkdir -p /root/provider-playbooks/host_vars
+
+# Create the host_vars file for setting up provider
+# Set up the configuration file for our main provider node (node1)
+# Remember: If your deployment includes multiple nodes and each of the nodes uses unique configuration(s), we would need to use multiple host_var files with their unique settings
+cat >> /root/provider-playbooks/host_vars/node1.yml << EOF
+# Node Configuration - Host Vars File
+
+## Provider Identification
+akash1_address: ""  # Your Akash wallet address
+
+## Security Credentials
+provider_b64_key: ""        # Base64-encoded provider key
+provider_b64_keysecret: ""  # Base64-encoded provider key secret
+
+## Network Configuration
+domain: ""          # Publicly accessible DNS name dedicated for your provider, e.g. "t100.abc.xy.akash.pub"
+region: ""          # Set your region here, e.g. "us-west"
+
+## Organization Details
+host: "akash"
+organization: ""  # Your organization name
+email: ""         # Contact email address
+website: ""       # Organization website
+
+## Notes:
+# - Replace empty values with your actual configuration
+# - Keep sensitive values secure and never share them publicly
+# - Ensure domain format follows Akash naming conventions
+EOF
+```
+> NOTE: provider_b64_key and provider_b64_keysecret can be passed as a host_var. For better security, we recommend passing `provider_b64_key` and `provider_b64_keysecret` as runtime variables with the `-e` flag (e.g., `ansible-playbook main.yml -e "host=all provider_b64_key=VALUE provider_b64_keysecret=VALUE"`) rather than storing them in host_vars files. This prevents credentials from being saved to disk in plain text.
+
+#### Important Notes
+
+- Create a separate .yml file for each node in your cluster
+- Keep the placeholders for keys if you haven't generated them yet
+- You'll fill in the empty values after generating keys and certificates
+- For multi-node deployments, repeat this process with appropriate values for each node
+- Provider playbook should only run on the Kubernetes control plane (typically node1).
+
+#### STEP 12 - Running the Ansible Playbook
+
+Deploy your Akash Provider by running the Ansible playbook:
 
 ```bash
 ansible-playbook -i inventory/akash/hosts.yaml cluster.yml -t kubespray,os,provider,gpu -e 'host=node1' -v
 ```
 
-> Note: Each tag involes each role which requires specific variables. Refer to the Configuration Variables in the README under each role.
+#### Notes:
 
-> For an All-in-One node setup, we can also consider using  extra vars -e option with the above command as it's a simpler deployment with all components on a single node.
-> However, when dealing with a Kubernetes cluster involving multiple nodes, using host_vars is the better approach. This allows you to define specific variables for each host in the cluster, providing more granular configuration control and better organization of your infrastructure as code.
+- The command includes the following tags:
+  - *kubespray*: Sets up the Kubernetes cluster
+  - *os*: Configures the operating system
+  - *provider*: Deploys the Akash provider software
+  - *gpu*: Configures GPU support if available
 
 
-#### Deploy Tailscale
+- For single-node deployments, using command-line variables with -e is sufficient
+- For multi-node clusters, using the host_vars files created in Step 8 is recommended for better organization
+- Each role has specific variable requirements - refer to the README in each role directory for details
+
+
+### Role-Specific Variables
+
+Each role in the playbook has specific configuration variables that can be set to customize your deployment. These variables can be defined in your inventory files, host_vars files, or passed directly using the -e parameter.
+
+#### Tailscale Role (OPTIONAL)
+Tailscale is a simple networking tool that creates a secure private network between your devices with minimal configuration. It lets you access services safely without public internet exposure by handling complex security and connection details automatically.
+
+`tailscale_authkey`: Your Tailscale authentication key - allows a device to join your Tailscale network securely.
+`tailscale_hostname`: The hostname for the Tailscale node.
+Refer [here](https://github.com/akash-network/provider-playbooks/blob/main/roles/tailscale/README.md#configuration-variables) for optional variables that can be customized.
+
+> Note: Tailscale is entirely optional when deploying an Akash provider.
+
 ```bash
 ansible-playbook playbooks.yml -i inventory.yml -t tailscale -v -e 'tailscale_authkey=tskey-auth-xxxx host=node1.t100.abc.xy.akash.pub'
 ```
-Note: You can set the tailscale_hostname option using extra vars or define it in the host_vars file.
+
+Note: You can set the tailscale_hostname option using extra vars if its a single-node cluster or define it in the host_vars file if its a multi-node cluster.
+
 **example:**
 ```bash
 ansible-playbook playbooks.yml -i inventory.yml -t tailscale -v -e 'tailscale_authkey=tskey-auth-xxxx host=node1.t100.abc.xy.akash.pub tailscale_hostname=node1.t100.abc.xy.akash.pub'
 ```
 
-#### Deploy Provider
-```bash
-ansible-playbook playbooks.yml -i inventory.yml -t op,provider -v -e 'provider_name=t100.abc.xy.akash.pub provider_version=0.6.9 host=node1.t100.abc.xy.akash.pub akash1_address=akash1xxxx'
-```
+#### OS Role
+No additional variables required beyond host specification.
 
-#### Configure GPU
-```bash
-ansible-playbook -i inventory.yaml playbooks.yaml -t gpu -v -e "host=all"
-```
+#### OP Role (OPTIONAL)
+
+`provider_name`: The name of your Akash provider
+Refer [here](https://github.com/akash-network/provider-playbooks/blob/main/roles/op/README.md#configuration-variables) for optional variables that can be customized.
+
+> Note: OP is entirely optional when deploying an Akash provider.
+
+#### Provider Role
+
+`provider_name`: The name of your Akash provider .
+`provider_version`: The version of the Akash provider to deploy.
+`akash1_address`: Your Akash wallet address
+Refer [here](https://github.com/akash-network/provider-playbooks/blob/main/roles/provider/README.md#configuration-variables) for optional variables that can be customized.
+
+#### GPU Role
+
+No additional variables required beyond host specification.
+Refer [here](https://github.com/akash-network/provider-playbooks/blob/main/roles/provider/README.md#configuration-variables) for optional variables that can be customized.
 
 #### Common Options
 Verbosity levels: -v, -vv, -vvv, -vvvv

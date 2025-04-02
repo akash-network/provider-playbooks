@@ -20,12 +20,11 @@
   kubernetes.core.k8s:
     state: patched
     kind: Node
-    name: "{{ item }}"
+    name: "{{ inventory_hostname }}"
     definition:
       metadata:
         labels:
           allow-nvdp: "true"
-  loop: "{{ gpu_nodes }}"
 
 - name: Add NVIDIA Device Plugin Helm repository
   kubernetes.core.helm_repository:

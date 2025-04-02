@@ -27,7 +27,7 @@
     - op
 
 - name: Provider Playbook
-  hosts: "{{ host }}" # The target should be usually on a node where kubectl talks to the API server.
+  hosts: node1
   become: true
   become_user: root
   serial: "{{ serial_hosts | default(1) }}"
