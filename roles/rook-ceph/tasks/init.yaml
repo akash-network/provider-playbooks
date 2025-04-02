@@ -30,3 +30,8 @@
   ansible.builtin.fail:
     msg: "Kubernetes version {{ k8s_server_version }} is not compatible with Rook-Ceph (min 1.22.0)"
   when: k8s_server_version is version('1.22.0', '<', version_type='semver')
+
+- name: Install Kubernetes Python module via apt
+  ansible.builtin.apt:
+    name: python3-kubernetes
+    state: present
