@@ -11,6 +11,7 @@ This project tracks all tasks related to developing and maintaining custom Ansib
 - **Networking:** Deployment of Tailscale via custom Ansible playbooks.
 - **Provider:** Deployment of Akash Provider.
 - **OS:** Sets up sysctl and cron jobs in the nodes.
+- **rook-ceph** Sets up persistent storage based on rook-ceph. See additional details in roles/rook-ceph/README.md
 
 ### Prerequisites
 Before running any Ansible playbooks, please ensure:

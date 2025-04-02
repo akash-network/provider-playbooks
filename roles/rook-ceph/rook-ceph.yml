@@ -1,0 +1,6 @@
+---
+- name: Deploy Rook Ceph
+  hosts: all
+  become: true
+  roles:
+    - role: rook-ceph
