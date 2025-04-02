@@ -46,7 +46,7 @@ This guide walks you through the process of building an Akash Provider using Ans
 #### STEP 1 - Clone the Kubespray Repository
 ```bash
 cd ~
-git clone -b v2.27.0 --depth=1 https://github.com/kubernetes-sigs/kubespray.git
+git clone -b v2.26.0 --depth=1 https://github.com/kubernetes-sigs/kubespray.git
 ```
 
 #### STEP 2 - Install Ansible
@@ -425,7 +425,9 @@ Based on the host keys under `hosts` that was defined in the STEP 4 Example (`/r
 # Create the host_vars directory if it doesn't exist
 mkdir -p /root/provider-playbooks/host_vars
 
-#Create the host_vars file for setting up provider
+# Create the host_vars file for setting up provider
+# Set up the configuration file for our main provider node (node1)
+# Remember: If your deployment includes multiple nodes and each of the nodes uses unique configuration(s), we would need to use multiple host_var files with their unique settings
 cat >> /root/provider-playbooks/host_vars/node1.yml << EOF
 # Node Configuration - Host Vars File
 
