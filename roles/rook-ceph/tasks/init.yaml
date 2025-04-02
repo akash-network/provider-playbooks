@@ -10,19 +10,11 @@
     msg: "This task can only be run on a Kubernetes control plane node"
   when: control_plane_check.rc != 0
 
-- name: Install Kubernetes Python package (on control host only)
-  ansible.builtin.pip:
-    name: kubernetes
-    state: present
-    executable: /root/kubespray/venv/bin/pip
-
 - name: Check Kubernetes cluster accessibility
   kubernetes.core.k8s_info:
     kind: Node
   register: k8s_nodes
   failed_when: k8s_nodes.resources | length == 0
-  vars:
-    ansible_python_interpreter: /root/kubespray/venv/bin/python
 
 - name: Get Kubernetes version
   ansible.builtin.command: kubectl version -o json
