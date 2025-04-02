@@ -443,7 +443,7 @@ domain: ""          # Publicly accessible DNS name dedicated for your provider, 
 region: ""          # Set your region here, e.g. "us-west"
 
 ## Organization Details
-host: ""          # Provider node hostname
+host: "akash"
 organization: ""  # Your organization name
 email: ""         # Contact email address
 website: ""       # Organization website
