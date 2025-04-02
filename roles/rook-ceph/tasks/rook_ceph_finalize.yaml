@@ -1,17 +1,30 @@
 ---
+# this is not needed - i dont see the file rook-ceph-cluster.values.yml
 - name: Load rook-ceph values from file
-  set_fact:
+  ansible.builtin.set_fact:
     rook_ceph_values: "{{ lookup('file', role_path + '/rook-ceph-cluster.values.yml') | from_yaml }}"
 
 - name: Set storage class name from rook-ceph values
-  set_fact:
+  ansible.builtin.set_fact:
     rook_ceph_storage_class: "{{ rook_ceph_values.cephBlockPools[0].storageClass.name }}"
 
 - name: Label the storage class with akash.network=true
-  shell: >
-    kubectl label storageclass {{ rook_ceph_storage_class }} akash.network=true --overwrite
-  register: label_result
-  changed_when: "'labeled' in label_result.stdout or 'configured' in label_result.stdout"
-  failed_when: label_result.rc != 0
-  delegate_to: localhost
-  run_once: true
+  kubernetes.core.k8s:
+    kind: StorageClass
+    name: "{{ rook_ceph_storage_class }}"
+    state: present
+    definition:
+      metadata:
+        labels:
+          akash.network: "true"
+
+- name: Ensure 'rbd' module is listed in /etc/modules
+  ansible.builtin.lineinfile:
+    path: /etc/modules
+    line: rbd
+    state: present
+
+- name: Load the 'rbd' kernel module
+  community.general.modprobe:
+    name: rbd
+    state: present

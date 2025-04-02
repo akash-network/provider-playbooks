@@ -1,0 +1,40 @@
+---
+- name: Check if node has control-plane label
+  ansible.builtin.shell: kubectl get node {{ inventory_hostname }} --no-headers -o custom-columns=LABELS:.metadata.labels | grep -q 'node-role.kubernetes.io/control-plane\|node-role.kubernetes.io/master'
+  register: control_plane_check
+  failed_when: false
+  changed_when: false
+
+- name: Fail if not a control plane node
+  ansible.builtin.fail:
+    msg: "This task can only be run on a Kubernetes control plane node"
+  when: control_plane_check.rc != 0
+
+- name: Install Kubernetes Python package (on control host only)
+  ansible.builtin.pip:
+    name: kubernetes
+    state: present
+    executable: /root/kubespray/venv/bin/pip
+
+- name: Check Kubernetes cluster accessibility
+  kubernetes.core.k8s_info:
+    kind: Node
+  register: k8s_nodes
+  failed_when: k8s_nodes.resources | length == 0
+  vars:
+    ansible_python_interpreter: /root/kubespray/venv/bin/python
+
+- name: Get Kubernetes version
+  ansible.builtin.command: kubectl version -o json
+  register: k8s_version
+  changed_when: false
+  run_once: true
+
+- name: Set Kubernetes version fact
+  ansible.builtin.set_fact:
+    k8s_server_version: "{{ (k8s_version.stdout | from_json).serverVersion.gitVersion | regex_replace('^v', '') }}"
+
+- name: Ensure Kubernetes version is compatible
+  ansible.builtin.fail:
+    msg: "Kubernetes version {{ k8s_server_version }} is not compatible with Rook-Ceph (min 1.22.0)"
+  when: k8s_server_version is version('1.22.0', '<', version_type='semver')
