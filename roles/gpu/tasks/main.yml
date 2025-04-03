@@ -1,14 +1,34 @@
 ---
 # tasks file for gpu
-- name:  apt update
-  ansible.builtin.import_tasks: apt_update.yml
- 
-- name: nvidia update
-  ansible.builtin.import_tasks: nvidia_update.yml
+- name: Check if node has NVIDIA GPU
+  ansible.builtin.shell: lspci | grep -i nvidia
+  register: gpu_check
+  changed_when: false
+  failed_when: false
 
-- name: Install the container toolkit
-  ansible.builtin.import_tasks: nvidia_ctoolkit.yml
+- name: Set fact for GPU presence
+  ansible.builtin.set_fact:
+    has_gpu: "{{ gpu_check.rc == 0 }}"
 
-- name: Apply the nvidia runtime and nvidia-device-plugin
-  ansible.builtin.import_tasks: nvdp.yml
+- name: Skip GPU tasks if no GPU is present
+  ansible.builtin.debug:
+    msg: "No NVIDIA GPU detected on this node. Skipping GPU tasks."
+  when: not has_gpu
+
+- name: Include GPU tasks only if GPU is present
+  ansible.builtin.include_tasks: apt_update.yml
+  when: has_gpu
+
+- name: Include NVIDIA update tasks only if GPU is present
+  ansible.builtin.include_tasks: nvidia_update.yml
+  when: has_gpu
+
+- name: Include container toolkit tasks only if GPU is present
+  ansible.builtin.include_tasks: nvidia_ctoolkit.yml
+  when: has_gpu
+
+- name: Include NVIDIA device plugin tasks only if GPU is present
+  ansible.builtin.include_tasks: nvdp.yml
+  when: has_gpu
+
 

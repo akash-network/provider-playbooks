@@ -1,7 +1,6 @@
 ---
 # defaults file for provider
 node: "http://akash-node-1:26657"
-provider_version: "0.6.9"
 withdrawal_period: "12h"
 tier: "community"
 
@@ -14,4 +13,3 @@ price_hd_pers_ssd: 0.03
 price_hd_pers_nvme: 0.1
 price_endpoint: 0.05
 price_ip: 5
-price_gpu_mappings: "a100=569,*=569"

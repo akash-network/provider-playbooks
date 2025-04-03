@@ -25,6 +25,7 @@
       metadata:
         labels:
           allow-nvdp: "true"
+          nvidia.com/gpu.present: "true"
 
 - name: Add NVIDIA Device Plugin Helm repository
   kubernetes.core.helm_repository:

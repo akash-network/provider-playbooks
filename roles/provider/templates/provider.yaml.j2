@@ -40,26 +40,6 @@ attributes:
   - key: cpu-arch
     value: "{{ cpu_arch }}"
 {% endif %}
-{% if gpu is defined and gpu %}
-  - key: gpu
-    value: "{{ gpu }}"
-{% endif %}
-{% if gpu_model_a100 is defined and gpu_model_a100 %}
-  - key: gpu-model-a100
-    value: "{{ gpu_model_a100 }}"
-{% endif %}
-{% if gpu_model_a100_ram_80 is defined and gpu_model_a100_ram_80 %}
-  - key: gpu-model-a100-ram-80
-    value: "{{ gpu_model_a100_ram_80 }}"
-{% endif %}
-{% if gpu_model_a100_ram_sxm is defined and gpu_model_a100_ram_sxm %}
-  - key: gpu-model-a100-ram-sxm
-    value: "{{ gpu_model_a100_ram_sxm }}"
-{% endif %}
-{% if gpu_model_a100_sxm is defined and gpu_model_a100_sxm %}
-  - key: gpu-model-a100-sxm
-    value: "{{ gpu_model_a100_sxm }}"
-{% endif %}
 {% if storage_one_class is defined and storage_one_class %}
   - key: storage-one-class
     value: "{{ storage_one_class }}"
