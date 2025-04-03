@@ -28,7 +28,7 @@
   changed_when: false
   failed_when: false
 
-- name: Check if driver is already at the required version
+- name: Check if nvidia-container-toolkit/runtime is already at the required version
   ansible.builtin.debug:
     msg:
       - "nvidia-container-toolkit installed: {{ toolkit_check.rc == 0 }}"
@@ -42,6 +42,7 @@
     state: present
     update_cache: yes
   when: (toolkit_check.rc != 0 or runtime_check.rc != 0)
+
 
 - name: Remove existing NVIDIA repository files
   ansible.builtin.file:
@@ -58,6 +59,11 @@
     state: present
     filename: nvidia-container-toolkit
     update_cache: yes
+
+- name: Check if driver is already at the required version
+  ansible.builtin.debug:
+    msg: "NVIDIA driver is already at version {{ current_driver_version }}. No action required."
+  when: current_driver_version == nvidia_version
 
 - name: Add NVIDIA GPG key
   ansible.builtin.apt_key:
@@ -89,7 +95,8 @@
   ansible.builtin.apt:
     update_cache: yes
 
-- name: Install NVIDIA driver 565
+- name: Install NVIDIA driver
+
   ansible.builtin.apt:
     name: "nvidia-driver-{{ nvidia_major_version }}"
     state: present

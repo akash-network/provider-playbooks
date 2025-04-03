@@ -1,0 +1,13 @@
+---
+## These tasks need to be completed in order for the rook-ceph to be operational
+- name: Proceed running the subsequent steps only if this is a K8s control plane
+  ansible.builtin.import_tasks: init.yaml
+
+- name: Install Rook-CEPH Operator
+  ansible.builtin.import_tasks: rook_ceph_operator.yaml
+
+- name: Install Rook-CEPH Cluster
+  ansible.builtin.import_tasks: rook_ceph_cluster.yaml
+
+- name: Finishing tasks
+  ansible.builtin.import_tasks: rook_ceph_finalize.yaml

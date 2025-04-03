@@ -1,5 +1,5 @@
 galaxy_info:
-  author: Vignesh V
+  author: Vignesh V, Andrey Arapov
   description: Ansible role to setup Provider in Ubuntu.
   company: Overclock
   license: Apache-2.0

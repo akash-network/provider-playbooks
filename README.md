@@ -5,7 +5,14 @@
 ### Have not tested op or tailscale book yet, going to add shimpas rook-ceph book soon too
 
 
+
 This repository contains Ansible playbooks for setting up and managing an Akash Provider node.
+- **Secrets Management:** Integration of 1Password Secrets Management into the provider build playbooks.
+- **GPU Support:** Installation of NVIDIA GPU drivers and runtime components.
+- **Networking:** Deployment of Tailscale via custom Ansible playbooks.
+- **Provider:** Deployment of Akash Provider.
+- **OS:** Sets up sysctl and cron jobs in the nodes.
+- **rook-ceph** Sets up persistent storage based on rook-ceph. See additional details in roles/rook-ceph/README.md
 
 ## Prerequisites
 
@@ -70,13 +77,15 @@ If you need to run playbooks manually:
 # Run all playbooks
 ansible-playbook -i inventory/hosts.yaml playbooks.yml
 
+
 # Run specific playbooks using tags
 ansible-playbook -i inventory/hosts.yaml playbooks.yml -t os,provider,gpu
-```
+
 
 ## Troubleshooting
 
 Common issues and solutions:
+
 
 1. **SSH Connection Issues**
    - Ensure SSH keys are properly set up
@@ -94,6 +103,7 @@ Common issues and solutions:
    - Review provider logs
 
 ## Support
+
 
 For support, please:
 - Check the [Akash Documentation](https://docs.akash.network)

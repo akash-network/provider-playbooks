@@ -63,8 +63,3 @@
   ansible.builtin.apt:
     name: python3-kubernetes
     state: present
-
-- name: Remove unused packages
-  ansible.builtin.apt:
-    autoremove: yes
-    force_apt_get: yes

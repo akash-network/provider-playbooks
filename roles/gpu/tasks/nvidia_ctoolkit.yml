@@ -4,11 +4,17 @@
     path: "{{ cruntime_toml_path }}"
   register: nvidia_config_file
 
+- name: Check if backup file already exists
+  ansible.builtin.stat:
+    path: "{{ cruntime_toml_path }}_bk"
+  register: backup_stat
+
 - name: Take the backup of the existing file
   ansible.builtin.copy:
     src: "{{ cruntime_toml_path }}"
     dest: "{{ cruntime_toml_path }}_bk"
     remote_src: yes
+  when: not backup_stat.stat.exists
 
 - name: Copy the container runtime config file
   ansible.builtin.copy:

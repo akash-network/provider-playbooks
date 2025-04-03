@@ -1,8 +1,17 @@
 ---
+helm_install_version: v3.17.2
+
 # defaults file for provider
 node: "http://akash-node-1:26657"
+
 withdrawal_period: "12h"
-tier: "community"
+
+# provider attributes
+attributes:
+  - key: host
+    value: akash
+  - key: tier
+    value: community
 
 # price targets
 price_cpu: 1.60

@@ -45,3 +45,13 @@
     - gpu
   tags:
     - gpu
+
+- name: Persistent Storage rook-ceph playbook
+  hosts: node1
+  become: true
+  become_user: root
+  serial: "{{ serial_hosts | default(1) }}"
+  roles:
+    - rook-ceph
+  tags:
+    - rook-ceph

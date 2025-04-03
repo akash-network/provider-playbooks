@@ -20,21 +20,29 @@
         path: /etc/logrotate.d/syslog
         state: absent
 
-    - name: Add 'su syslog syslog' in rsyslog logrotate config
+    - name: Run logrotate with system configuration to check for errors
+      ansible.builtin.command: /usr/sbin/logrotate /etc/logrotate.conf
+      register: logrotate_result
+      changed_when: false
+      failed_when: false
+
+    - name: Add 'su syslog adm' in rsyslog logrotate config if logrotate succeeds
       ansible.builtin.lineinfile:
         path: /etc/logrotate.d/rsyslog
         insertbefore: '^\s*rotate\s+4'
-        line: '  su syslog syslog'
+        line: '  su syslog adm'
         state: present
+      when: logrotate_result.rc == 0
 
     - name: Run logrotate with system configuration
       ansible.builtin.command: /usr/sbin/logrotate /etc/logrotate.conf
-      register: logrotate_result
-      changed_when: logrotate_result.stdout != "" or logrotate_result.stderr != ""
+      register: logrotate_final_result
+      changed_when: logrotate_final_result.stdout != "" or logrotate_final_result.stderr != ""
       failed_when: false
 
     - name: Force run logrotate for rsyslog
       ansible.builtin.command: logrotate -f /etc/logrotate.d/rsyslog
       register: logrotate_force_result
+      when: logrotate_final_result.rc != 0
       changed_when: logrotate_force_result.stdout != "" or logrotate_force_result.stderr != ""
       failed_when: false

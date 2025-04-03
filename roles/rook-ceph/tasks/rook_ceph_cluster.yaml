@@ -1,0 +1,14 @@
+- name: Copy rook-ceph values file to remote host
+  copy:
+    src: "{{ role_path }}/rook-ceph-cluster.values.yml"
+    dest: "/tmp/rook-ceph-cluster.values.yml"
+
+- name: Install Rook-Ceph Cluster via Helm
+  kubernetes.core.helm:
+    name: rook-ceph-cluster
+    chart_ref: rook-release/rook-ceph-cluster
+    release_namespace: "{{ rook_ceph_namespace }}"
+    chart_version: "{{ rook_ceph_version }}"
+    values_files:
+      - /tmp/rook-ceph-cluster.values.yml
+    state: present
