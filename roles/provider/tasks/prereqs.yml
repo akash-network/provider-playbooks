@@ -20,13 +20,7 @@
   kubernetes.core.helm_repository:
     name: akash
     state: absent
-  register: remove_result
-  failed_when: >
-    remove_result.rc != 0 and 
-    "Error: repository name (akash) not found" not in remove_result.stderr and
-    "Error: no repositories configured" not in remove_result.stderr and
-    "Error: no repo named \"akash\" found" not in remove_result.stderr
-  changed_when: remove_result.rc == 0
+  failed_when: false
 
 - name: Add required Helm repositories
   kubernetes.core.helm_repository:
