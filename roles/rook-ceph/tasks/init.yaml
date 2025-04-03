@@ -20,7 +20,6 @@
   ansible.builtin.command: kubectl version -o json
   register: k8s_version
   changed_when: false
-  run_once: true
 
 - name: Set Kubernetes version fact
   ansible.builtin.set_fact:

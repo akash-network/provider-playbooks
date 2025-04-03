@@ -1,4 +1,6 @@
 ---
+helm_install_version: v3.17.2
+
 # defaults file for provider
 node: "http://akash-node-1:26657"
 provider_version: "0.6.11-rc1"
