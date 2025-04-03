@@ -17,18 +17,3 @@
     - core20
     - snapd
   failed_when: false
-
-- name: Purge snapd package
-  ansible.builtin.apt:
-    name: snapd
-    state: absent
-    purge: yes
-    autoremove: yes
-
-- name: Remove snapd directories
-  ansible.builtin.file:
-    path: "{{ item }}"
-    state: absent
-  loop:
-    - /var/cache/snapd
-    - /root/snap        

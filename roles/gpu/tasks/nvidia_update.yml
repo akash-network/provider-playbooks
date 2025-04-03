@@ -27,7 +27,7 @@
   changed_when: false
   failed_when: false
 
-- name: Check if driver is already at the required version
+- name: Check if nvidia-container-toolkit/runtime is already at the required version
   ansible.builtin.debug:
     msg:
       - "nvidia-container-toolkit installed: {{ toolkit_check.rc == 0 }}"
@@ -43,7 +43,7 @@
   when: (toolkit_check.rc != 0 or runtime_check.rc != 0)
 
 - name: Check if driver is already at the required version
-  ansible.builtin.fail:
+  ansible.builtin.debug:
     msg: "NVIDIA driver is already at version {{ current_driver_version }}. No action required."
   when: current_driver_version == nvidia_version
 
@@ -79,50 +79,14 @@
   ansible.builtin.apt:
     update_cache: yes
 
-- name: Install NVIDIA driver and autoremove unused packages
+- name: Install NVIDIA driver
   ansible.builtin.apt:
     name: nvidia-driver-{{ nvidia_major_version }}
     state: present
     dpkg_options: 'force-confdef,force-confold'
-    autoremove: yes
     force_apt_get: yes
   environment:
     DEBIAN_FRONTEND: noninteractive
-
-- name: Unload all NVIDIA modules in reverse order
-  ansible.builtin.shell: |
-    set +e
-    if lsmod | grep -q gdrdrv; then rmmod -f gdrdrv; fi
-    if lsmod | grep -q nvidia_uvm; then rmmod -f nvidia_uvm; fi
-    if lsmod | grep -q nvidia_drm; then rmmod -f nvidia_drm; fi
-    if lsmod | grep -q nvidia_modeset; then rmmod -f nvidia_modeset; fi
-    if lsmod | grep -q nvidia; then rmmod -f nvidia; fi
-  args:
-    executable: /bin/bash
-
-- name: Sleep for a moment
-  ansible.builtin.pause:
-    seconds: 5
-
-- name: Load dependent NVIDIA modules one by one
-  ansible.builtin.shell: "modprobe {{ item }}"
-  loop:
-    - nvidia
-    - nvidia_modeset
-    - nvidia_drm
-    - nvidia_uvm
-
-- name: Check if gdrdrv module exists
-  ansible.builtin.command: modinfo gdrdrv
-  register: gdrdrv_check
-  failed_when: false
-  changed_when: false
-
-- name: Load gdrdrv module if available
-  ansible.builtin.command: modprobe gdrdrv
-  when: gdrdrv_check.rc == 0
-  register: gdrdrv_load
-  failed_when: false
 
 - name: Check if NVIDIA GPUs are PCIe
   ansible.builtin.shell: nvidia-smi -L

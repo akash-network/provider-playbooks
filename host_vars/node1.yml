@@ -12,10 +12,16 @@ domain: ""                # Domain name
 region: ""                # Region name
 
 ## Organization Details
-host: ""          # Provider node hostname
 organization: ""  # Your organization name
 email: ""         # Contact email address
 website: ""       # Organization website
+
+# provider attributes
+attributes:
+  - key: host
+    value: akash
+  - key: tier
+    value: community
 
 ## Notes:
 # - Replace empty values with your actual configuration

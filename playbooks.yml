@@ -47,7 +47,7 @@
     - gpu
 
 - name: Persistent Storage rook-ceph playbook
-  hosts: "{{ host }}"
+  hosts: node1
   become: true
   become_user: root
   serial: "{{ serial_hosts | default(1) }}"

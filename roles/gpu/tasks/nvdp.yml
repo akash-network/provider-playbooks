@@ -74,7 +74,7 @@
     chart_ref: nvdp/nvidia-device-plugin
     release_namespace: nvidia-device-plugin
     create_namespace: true
-    chart_version: 0.17.0
+    chart_version: 0.17.1
     values:
       runtimeClassName: nvidia
       deviceListStrategy: volume-mounts

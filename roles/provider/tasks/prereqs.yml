@@ -1,6 +1,25 @@
 ---
+- name: Check current Helm version (if any)
+  ansible.builtin.command: helm version --short
+  register: helm_version
+  failed_when: false
+
+- name: Download Helm install script
+  ansible.builtin.get_url:
+    url: https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+    dest: /tmp/get_helm.sh
+    mode: '0755'
+
+- name: Run Helm install script for "{{ helm_install_version }}"
+  environment:
+    HELM_INSTALL_VERSION: "{{ helm_install_version }}"
+  ansible.builtin.command: /tmp/get_helm.sh
+  when: helm_version.stdout is not defined or 'v3.17.2' not in helm_version.stdout
+
 - name: Remove Akash Helm repository if it exists
-  ansible.builtin.command: helm repo remove akash
+  kubernetes.core.helm_repository:
+    name: akash
+    state: absent
   register: remove_result
   failed_when: >
     remove_result.rc != 0 and 

@@ -44,7 +44,7 @@
     - name: Set Rook-Ceph defaults
       set_fact:
         rook_ceph_namespace: "{{ rook_ceph_namespace | default('rook-ceph') }}"
-        rook_ceph_version: "{{ rook_ceph_version | default('v1.16.2') }}"
+        rook_ceph_version: "{{ rook_ceph_version | default('v1.16.6') }}"
 
 - name: Add and Update Helm Repository for Rook-Ceph
   hosts: localhost
