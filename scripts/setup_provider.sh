@@ -472,6 +472,7 @@ setup_wallet() {
         key_output=$(provider-services keys add default)
         # Extract address from the output using grep and cut
         wallet_address=$(echo "$key_output" | grep "address:" | cut -d: -f2 | tr -d ' ')
+        print_status "New wallet created with address: $wallet_address"
     elif [[ "$key_option" == "key" ]]; then
         print_status "Importing existing wallet key..."
         read -p "Enter the path to your key.pem file: " key_path
@@ -480,10 +481,25 @@ setup_wallet() {
             return 1
         fi
         provider-services keys import default "$key_path"
+        # Get the address after import
+        wallet_address=$(provider-services keys show default -a)
+        print_status "Wallet imported with address: $wallet_address"
     else
         print_status "Importing wallet from mnemonic..."
         provider-services keys add default --recover
+        # Get the address after recovery
+        wallet_address=$(provider-services keys show default -a)
+        print_status "Wallet recovered with address: $wallet_address"
     fi
+    
+    # Verify we have a wallet address
+    if [ -z "$wallet_address" ]; then
+        print_error "Failed to get wallet address"
+        return 1
+    fi
+    
+    # Debug output
+    print_status "Debug: Wallet address before file creation: $wallet_address"
     
     # Small delay to ensure key operations are complete
     sleep 1
@@ -504,17 +520,19 @@ setup_wallet() {
         key_b64=$(cat key.pem | base64 | tr -d '\n')
         
         # Create host_vars directory if it doesn't exist
-        mkdir -p host_vars
-        
-        # Create or update node1.yml if it doesn't exist with wallet fields
-        if [ ! -f "host_vars/node1.yml" ]; then
-            cat > host_vars/node1.yml << EOF
+        mkdir -p /root/provider-playbooks/host_vars
+
+        # Debug output before file creation
+        print_status "Debug: Creating host_vars file with wallet address: $wallet_address"
+
+        # Update the host_vars file with the wallet information
+        cat > /root/provider-playbooks/host_vars/node1.yml << EOF
 # Node Configuration - Host Vars File
 
 ## Provider Identification
-akash1_address: ""  # Your Akash wallet address
-provider_b64_key: ""        # Will be filled after wallet setup
-provider_b64_keysecret: ""  # Will be filled after wallet setup
+akash1_address: "$wallet_address"
+provider_b64_key: "$key_b64"
+provider_b64_keysecret: ""  # Will be filled after password entry
 
 ## Network Configuration
 domain: "${provider_name}"
@@ -526,19 +544,18 @@ organization: "${provider_organization}"
 email: "${provider_email}"
 website: "${provider_website}"
 EOF
+        
+        # Verify the file was created with the correct content
+        if [ -f "/root/provider-playbooks/host_vars/node1.yml" ]; then
+            print_status "Debug: Verifying host_vars file content..."
+            cat /root/provider-playbooks/host_vars/node1.yml
+        else
+            print_error "Failed to create host_vars file"
+            return 1
         fi
         
-        # Update the provider_b64_key in node1.yml
-        sed -i "s/provider_b64_key: .*/provider_b64_key: \"$key_b64\"/" host_vars/node1.yml
-        sed -i "s/akash1_address: .*/akash1_address: \"$wallet_address\"/" host_vars/node1.yml
-        sed -i "s/domain: .*/domain: \"$provider_name\"/" host_vars/node1.yml
-        sed -i "s/region: .*/region: \"$provider_region\"/" host_vars/node1.yml
-        sed -i "s/organization: .*/organization: \"$provider_organization\"/" host_vars/node1.yml
-        sed -i "s/email: .*/email: \"$provider_email\"/" host_vars/node1.yml
-        sed -i "s/website: .*/website: \"$provider_website\"/" host_vars/node1.yml
-        sed -i "s/host: .*/host: \"akash\"/" host_vars/node1.yml
-        
-        print_status "Key has been encoded and saved to host_vars/node1.yml"
+        print_status "Key has been encoded and saved to /root/provider-playbooks/host_vars/node1.yml"
+        print_status "Wallet address: $wallet_address"
         
         # Prompt for key password and save it
         print_status "Please enter the password you used to encrypt the key"
@@ -548,8 +565,9 @@ EOF
         
         # Encode the password and save it
         password_b64=$(echo -n "$key_password" | base64 | tr -d '\n')
-        sed -i "s/provider_b64_keysecret: .*/provider_b64_keysecret: \"$password_b64\"/" host_vars/node1.yml
-        print_status "Key password has been encoded and saved to host_vars/node1.yml"
+        # Update the keysecret in the file
+        sed -i "s|provider_b64_keysecret: \"\"|provider_b64_keysecret: \"$password_b64\"|" /root/provider-playbooks/host_vars/node1.yml
+        print_status "Key password has been encoded and saved to /root/provider-playbooks/host_vars/node1.yml"
         
         # Clean up
         rm -f key.pem
@@ -764,10 +782,11 @@ cd ~/provider-playbooks
 # Create host_vars files for each node
 print_status "Creating host variables files..."
 
-# Create host_vars for all nodes
+# Create host_vars for all nodes except node1 (which is handled by setup_wallet)
 for i in "${!nodes[@]}"; do
     node_num=$((i + 1))
-    cat > "host_vars/node${node_num}.yml" << EOF
+    if [ "$node_num" != "1" ]; then
+        cat > "host_vars/node${node_num}.yml" << EOF
 # Node Configuration - Host Vars File
 
 ## Network Configuration
@@ -776,23 +795,6 @@ region: "${provider_region}"
 ## Organization Details
 host: "akash"
 organization: "${provider_organization}"
-EOF
-
-    # Add provider-specific configuration only for node1
-    if [ "$node_num" = "1" ]; then
-        cat >> "host_vars/node${node_num}.yml" << EOF
-
-## Provider Identification
-akash1_address: ""  # Will be filled after wallet setup
-provider_b64_key: ""        # Will be filled after wallet setup
-provider_b64_keysecret: ""  # Will be filled after wallet setup
-
-## Network Configuration
-domain: "${provider_name}"
-
-## Organization Details
-email: "${provider_email}"
-website: "${provider_website}"
 EOF
     fi
 done
@@ -926,12 +928,7 @@ for i in "${!nodes[@]}"; do
     node_user=$(echo ${nodes[$i]} | cut -d'|' -f2)
     node_port=$(echo ${nodes[$i]} | cut -d'|' -f3)
     
-    # Skip if the node is localhost or current machine
-    if [[ "$node_ip" == "127.0.0.1" ]] || [[ "$node_ip" == "localhost" ]] || [[ "$node_ip" == "$(hostname -I | awk '{print $1}')" ]]; then
-        print_warning "Skipping SSH key copy for localhost/current machine (${node_ip})"
-        continue
-    fi
-    
+    # Remove the localhost check to treat all nodes as remote
     print_status "Setting up SSH access for node${i}: ${node_user}@${node_ip}:${node_port}"
     if ! copy_ssh_key "$node_ip" "$node_user" "$node_port"; then
         print_error "Failed to set up SSH access for ${node_ip}. Please verify the connection details and try again."
