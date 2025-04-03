@@ -1,33 +1,19 @@
----
-- name: Check if nvidia-smi is available
-  ansible.builtin.command: which nvidia-smi
-  register: nvidia_smi_check
-  failed_when: false
-  changed_when: false
-  delegate_to: "{{ inventory_hostname }}"
-
-- name: Get GPU information from nvidia-smi
-  ansible.builtin.shell: |
-    nvidia-smi --query-gpu=driver_version,name,memory.total --format=csv,noheader
+- name: Check for NVIDIA GPUs on each node
+  ansible.builtin.shell: nvidia-smi --query-gpu=driver_version,name,memory.total --format=csv,noheader
   register: gpu_info_result
-  when: nvidia_smi_check.rc == 0
-  delegate_to: "{{ inventory_hostname }}"
   changed_when: false
   failed_when: false
 
-- name: Get CUDA version separately
-  ansible.builtin.shell: |
-    nvidia-smi | grep "CUDA Version" | awk '{print $9}'
+- name: Get CUDA version from nodes with GPUs
+  ansible.builtin.shell: nvidia-smi | grep "CUDA Version" | awk '{print $9}'
   register: cuda_version_result
-  when: nvidia_smi_check.rc == 0
-  delegate_to: "{{ inventory_hostname }}"
   changed_when: false
   failed_when: false
 
-- name: Set GPU facts for node
+- name: Set GPU facts for nodes
   ansible.builtin.set_fact:
-    node_gpu_info: "{{ gpu_info_result.stdout_lines | default([]) }}"
-  when: gpu_info_result is defined and gpu_info_result.rc is defined and gpu_info_result.rc == 0
+    node_gpu_info: "{{ gpu_info_result.stdout_lines }}"
+  when: gpu_info_result.rc == 0
 
 - name: Process GPU information
   ansible.builtin.set_fact:
@@ -42,12 +28,12 @@
 - name: Set CUDA version from nvidia-smi output
   ansible.builtin.set_fact:
     cuda_version: "{{ cuda_version_result.stdout | default('') }}"
-  when: cuda_version_result is defined and cuda_version_result.stdout is defined
+  when: cuda_version_result.rc == 0
 
 - name: Log GPU detection results
   ansible.builtin.debug:
     msg: |
-      GPU Detection Results:
+      GPU Detection Results for {{ inventory_hostname }}:
       - Driver Version: {{ driver_version | default('Not detected') }}
       - CUDA Version: {{ cuda_version | default('Not detected') }}
       {% if gpu_nodes is defined and gpu_nodes | length > 0 %}
@@ -56,7 +42,7 @@
         - {{ gpu.split(',')[1] }} ({{ gpu.split(',')[2] }})
       {% endfor %}
       {% endif %}
-  when: nvidia_smi_check is defined
+  when: gpu_info_result is defined
 
 - name: Set GPU presence fact
   ansible.builtin.set_fact:

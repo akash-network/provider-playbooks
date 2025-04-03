@@ -31,24 +31,32 @@
   kubernetes.core.helm_repository:
     name: nvdp
     repo_url: https://nvidia.github.io/k8s-device-plugin
+  delegate_to: node1
+  run_once: true
 
 - name: Update Helm repositories
   command: helm repo update
   changed_when: true
+  delegate_to: node1
+  run_once: true
 
 - name: Check for required GPU node labels
   ansible.builtin.shell: >
-    kubectl get nodes -o json | jq -r '.items[] |
+    kubectl get node {{ inventory_hostname }} -o json | jq -r '
     {
       "name": .metadata.name,
       "has_allow_nvdp": (.metadata.labels."allow-nvdp" == "true"),
     } | tostring'
   register: node_labels_check
   changed_when: false
+  delegate_to: node1
+  run_once: true
 
 - name: Parse node label results
   ansible.builtin.set_fact:
-    parsed_node_labels: "{{ node_labels_check.stdout_lines | map('from_json') | list }}"
+    parsed_node_labels: "{{ [node_labels_check.stdout | from_json] }}"
+  delegate_to: node1
+  run_once: true
 
 - name: Display nodes missing required labels
   ansible.builtin.debug:
@@ -56,6 +64,8 @@
       (item.has_allow_nvdp == false) | ternary('allow-nvdp=true ', '') }}"
   loop: "{{ parsed_node_labels }}"
   when: not (item.has_allow_nvdp)
+  delegate_to: node1
+  run_once: true
 
 - name: Fail if required labels are missing
   ansible.builtin.fail:
@@ -63,11 +73,15 @@
       (item.has_allow_nvdp == false) | ternary('allow-nvdp=true ', '') }}"
   loop: "{{ parsed_node_labels }}"
   when: not (item.has_allow_nvdp)
+  delegate_to: node1
+  run_once: true
 
 - name: Check if any node has all required labels
   ansible.builtin.set_fact:
     labels_ready: "{{ labels_ready | default(false) or (item.has_allow_nvdp) }}"
   loop: "{{ parsed_node_labels }}"
+  delegate_to: node1
+  run_once: true
 
 - name: Install NVIDIA Device Plugin
   kubernetes.core.helm:
@@ -83,3 +97,5 @@
         allow-nvdp: "true"
     state: present
   when: labels_ready | bool
+  delegate_to: node1
+  run_once: true
