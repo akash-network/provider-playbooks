@@ -12,10 +12,27 @@ domain: ""                # Domain name
 region: ""                # Region name
 
 ## Organization Details
-host: ""          # Provider node hostname
 organization: ""  # Your organization name
 email: ""         # Contact email address
 website: ""       # Organization website
+
+# provider attributes
+attributes:
+  - key: host
+    value: akash
+  - key: tier
+    value: community
+
+# price targets
+price_cpu: 1.60
+price_memory: 0.30
+price_hd_ephemeral: 0.02
+price_hd_pers_hdd: 0.01
+price_hd_pers_ssd: 0.03
+price_hd_pers_nvme: 0.1
+price_endpoint: 0.05
+price_ip: 5
+price_gpu_mappings: "a100=569,*=569"
 
 ## Notes:
 # - Replace empty values with your actual configuration

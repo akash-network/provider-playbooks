@@ -1,2 +1,2 @@
 rook_ceph_namespace: rook-ceph
-rook_ceph_version: "1.16.2"
+rook_ceph_version: "1.16.6"

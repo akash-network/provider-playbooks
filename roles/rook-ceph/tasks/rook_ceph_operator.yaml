@@ -1,5 +1,10 @@
 ---
 # Tasks for deploying the Rook-Ceph operator
+- name: Template Rook-Ceph operator Helm values file
+  template:
+    src: rook-ceph-operator.values.yml.j2
+    dest: /tmp/rook-ceph-operator.values.yml
+
 - name: Create Rook-Ceph namespace
   kubernetes.core.k8s:
     state: present
@@ -23,6 +28,8 @@
     release_namespace: "{{ rook_ceph_namespace }}"
     create_namespace: true
     chart_version: "{{ rook_ceph_version }}"
+    values_files:
+      - /tmp/rook-ceph-operator.values.yml
     wait: true
     wait_timeout: 600s
     state: present

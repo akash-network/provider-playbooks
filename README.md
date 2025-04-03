@@ -548,10 +548,27 @@ domain: ""          # Publicly accessible DNS name dedicated for your provider, 
 region: ""          # Set your region here, e.g. "us-west"
 
 ## Organization Details
-host: "akash"
 organization: ""  # Your organization name
 email: ""         # Contact email address
 website: ""       # Organization website
+
+# provider attributes
+attributes:
+  - key: host
+    value: akash
+  - key: tier
+    value: community
+
+# price targets
+price_cpu: 1.60
+price_memory: 0.30
+price_hd_ephemeral: 0.02
+price_hd_pers_hdd: 0.01
+price_hd_pers_ssd: 0.03
+price_hd_pers_nvme: 0.1
+price_endpoint: 0.05
+price_ip: 5
+price_gpu_mappings: "a100=569,*=569"
 
 ## Notes:
 # - Replace empty values with your actual configuration
@@ -628,7 +645,7 @@ Refer [here](https://github.com/akash-network/provider-playbooks/blob/main/roles
 #### Provider Role
 
 `provider_name`: The name of your Akash provider .
-`provider_version`: The version of the Akash provider to deploy.
+`provider_version`: The version of the Akash provider CRDs to deploy.
 `akash1_address`: Your Akash wallet address
 Refer [here](https://github.com/akash-network/provider-playbooks/blob/main/roles/provider/README.md#configuration-variables) for optional variables that can be customized.
 

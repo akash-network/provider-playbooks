@@ -42,11 +42,13 @@ get_input "What are the device names to use (e.g., sd*, nvme*)?" device_names
 get_input "How many OSDs per device?" osds_per_device
 get_input "What type of storage device (hdd, ssd, nvme)?" storage_device_type
 get_input "Do your worker nodes use ZFS for ephemeral storage?" zfs_for_ephemeral
+get_input "What is the custom kubeletDirPath for CSI? (default: /var/lib/kubelet)\n[Set this only if you are using a custom node filesystem location, e.g. /data/kubelet]" kubelet_dir_path
+kubelet_dir_path=${kubelet_dir_path:-/var/lib/kubelet}
 
 # Write to rook-ceph-defaults.yml
 cat > rook-ceph-defaults.yml << EOF
 rook_ceph_namespace: rook-ceph
-rook_ceph_version: "1.16.2"
+rook_ceph_version: "1.16.6"
 
 ceph_cluster:
   storage_hosts:
@@ -141,3 +143,10 @@ awk -v nodes="$NODE_LIST" '{gsub("{{ .NODE_LIST }}", nodes)}1' "$OUTPUT_FILE.tmp
 rm "$OUTPUT_FILE.tmp"
 
 echo "Generated rook-ceph-cluster.values.yml successfully."
+
+echo -e "\n📌 CSI kubeletDirPath set to: $kubelet_dir_path"
+echo "👉 Please make sure to set the following in your per-node host_vars:"
+for node in $NODE_NAMES; do
+  echo "   host_vars/${node}.yml:"
+  echo "     rook_ceph_kubelet_dir_path: \"$kubelet_dir_path\""
+done
