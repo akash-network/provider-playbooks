@@ -296,6 +296,7 @@ setup_python_env() {
         source venv/bin/activate
         run_with_spinner "pip3 install -r requirements.txt" "Installing Kubespray requirements"
         run_with_spinner "pip3 install ruamel.yaml" "Installing ruamel.yaml"
+        run_with_spinner "pip3 install kubernetes" "Installing Kubernetes Python module"
     else
         source venv/bin/activate
     fi
@@ -1072,36 +1073,8 @@ fi
 if $SELECTED_OS || $SELECTED_GPU || $SELECTED_PROVIDER || $SELECTED_TAILSCALE || $SELECTED_OP; then
     # Ensure we're in the provider-playbooks directory
     cd ~/provider-playbooks
-    
-    # Install python3-venv package if not already installed
-    if ! dpkg -s python3-venv &> /dev/null; then
-        print_status "Installing python3-venv package..."
-        apt-get update
-        apt-get install -y python3-venv
-    fi
-    
-    # Install Kubernetes Python module via apt on the Ansible host
-    print_status "Installing Kubernetes Python module on Ansible host..."
-    apt-get update
-    apt-get install -y python3-kubernetes
-    
-    # Install Kubernetes Python library in system Python environment on the Ansible host
-    print_status "Installing Kubernetes Python library in system Python environment on Ansible host..."
-    pip3 install kubernetes
-    
-    # Setup virtual environment for provider-playbooks if it doesn't exist
-    if [ ! -d "venv" ]; then
-        print_status "Setting up virtual environment for provider-playbooks..."
-        python3 -m venv venv
-        source venv/bin/activate
-        pip install -r requirements.txt
-        # Install additional required packages
-        pip install kubernetes
-    else
-        source venv/bin/activate
-        # Ensure kubernetes package is installed
-        pip install kubernetes
-    fi
+
+
     
     # Run OS playbook if selected
     if $SELECTED_OS; then
