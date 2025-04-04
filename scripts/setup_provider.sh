@@ -119,7 +119,7 @@ display_welcome() {
     echo -e "${GREEN}║                                                                ║${NC}"
     echo -e "${GREEN}╚════════════════════════════════════════════════════════════════╝${NC}"
     echo
-    echo -e "This script will help you set up and configure your Akash Provider node."
+    echo -e "This script will help you set up and configure your Akash Provider."
     echo -e "Answer a few questions and we'll handle the rest!"
     echo
 }
@@ -132,7 +132,6 @@ select_playbooks() {
     SELECTED_GPU=true
     SELECTED_PROVIDER=true
     SELECTED_TAILSCALE=true
-    SELECTED_OP=true
     
     # Define playbook explanations
     KUBESPRAY_DESC="Kubernetes installation using Kubespray (required for a new cluster)"
@@ -140,7 +139,6 @@ select_playbooks() {
     GPU_DESC="Will this cluster have one or more GPUs?"
     PROVIDER_DESC="Akash Provider service installation and configuration"
     TAILSCALE_DESC="Tailscale VPN for secure network access"
-    OP_DESC="1Password credentials manager for secure secrets storage"
     
     display_welcome
     
@@ -202,17 +200,6 @@ select_playbooks() {
         esac
     done
     
-    # OP
-    while true; do
-        echo -n -e "${BLUE}[?]${NC} Set up 1Password for secrets management? [y/n]: "
-        read -r response
-        case $response in
-            [Yy]* ) SELECTED_OP=true; break;;
-            [Nn]* ) SELECTED_OP=false; break;;
-            * ) echo "Please answer y or n.";;
-        esac
-    done
-    
     # Confirm selections
     echo
     echo -e "${YELLOW}You have selected the following playbooks:${NC}"
@@ -222,7 +209,6 @@ select_playbooks() {
     if $SELECTED_GPU; then print_menu_item "✓" "GPU - ${GPU_DESC}"; else print_menu_item "✗" "GPU - ${GPU_DESC}"; fi
     if $SELECTED_PROVIDER; then print_menu_item "✓" "Provider - ${PROVIDER_DESC}"; else print_menu_item "✗" "Provider - ${PROVIDER_DESC}"; fi
     if $SELECTED_TAILSCALE; then print_menu_item "✓" "Tailscale - ${TAILSCALE_DESC}"; else print_menu_item "✗" "Tailscale - ${TAILSCALE_DESC}"; fi
-    if $SELECTED_OP; then print_menu_item "✓" "OP - ${OP_DESC}"; else print_menu_item "✗" "OP - ${OP_DESC}"; fi
     
     echo
     while true; do
@@ -238,17 +224,6 @@ select_playbooks() {
 
 # Run the menu and get selections
 select_playbooks
-
-# Get provider domain name
-print_status "Provider Domain Information:"
-provider_name=$(get_input "Enter your provider domain name (e.g., example.com or test.example.com) Do not include "provider."" "" "[a-zA-Z0-9.-]+\.[a-zA-Z0-9.-]+")
-
-# Get Tailscale auth key if Tailscale is selected
-if $SELECTED_TAILSCALE; then
-    print_status "Tailscale Setup:"
-    read -p "Enter your Tailscale auth key: " tailscale_authkey
-    echo "Using Tailscale auth key: ${tailscale_authkey:0:8}..."
-fi
 
 # Function to check prerequisites
 check_prerequisites() {
@@ -318,6 +293,8 @@ check_prerequisites() {
             fi
         fi
     done
+    
+
     
     print_status "All prerequisites met"
 }
@@ -473,7 +450,7 @@ setup_wallet() {
     
     # Ask if user wants to create new key or import existing
     while true; do
-        printf "Do you want to create a new key, import from key file, or import from mnemonic? (new/key/mnemonic): "
+        printf "Do you want to create a new key, import from key file, import from seed phrase, or paste existing key? (new/key/seed/paste): "
         read -r key_option
         
         if [ -z "$key_option" ]; then
@@ -482,11 +459,11 @@ setup_wallet() {
         fi
         
         case "$key_option" in
-            new|key|mnemonic)
+            new|key|seed|paste)
                 break
                 ;;
             *)
-                print_error "Invalid option. Please enter 'new', 'key', or 'mnemonic'"
+                print_error "Invalid option. Please enter 'new', 'key', 'seed', or 'paste'"
                 ;;
         esac
     done
@@ -509,8 +486,56 @@ setup_wallet() {
         # Get the address after import
         wallet_address=$(provider-services keys show default -a)
         print_status "Wallet imported with address: $wallet_address"
+    elif [[ "$key_option" == "paste" ]]; then
+        print_status "Pasting existing AKT address key and key secret..."
+        read -p "Enter your AKT address: " wallet_address
+        read -p "Enter your base64 encoded key: " key_b64
+        read -p "Enter your base64 encoded key secret: " password_b64
+        
+        # Create host_vars directory if it doesn't exist
+        mkdir -p /root/provider-playbooks/host_vars
+
+        # Update the host_vars file with the wallet information
+        cat > /root/provider-playbooks/host_vars/node1.yml << EOF
+# Node Configuration - Host Vars File
+
+## Provider Identification
+akash1_address: "$wallet_address"
+provider_b64_key: "$key_b64"
+provider_b64_keysecret: "$password_b64"
+
+## Network Configuration
+domain: "${provider_name}"
+region: "${provider_region}"
+
+## Organization Details
+host: "akash"
+organization: "${provider_organization}"
+email: "${provider_email}"
+website: "${provider_website}"
+
+## Tailscale Configuration
+tailscale_hostname: "node1-$(echo "${provider_name}" | tr '.' '-')"
+tailscale_authkey: "${tailscale_authkey}"
+
+# provider attributes
+attributes:
+  - key: host
+    value: akash
+  - key: tier
+    value: community
+
+## Notes:
+# - Replace empty values with your actual configuration
+# - Keep sensitive values secure and never share them publicly
+# - Ensure domain format follows Akash naming conventions
+EOF
+        
+        print_status "Wallet information has been saved to /root/provider-playbooks/host_vars/node1.yml"
+        print_status "Wallet address: $wallet_address"
+        return 0
     else
-        print_status "Importing wallet from mnemonic..."
+        print_status "Importing wallet from seed phrase..."
         provider-services keys add default --recover
         # Get the address after recovery
         wallet_address=$(provider-services keys show default -a)
@@ -602,17 +627,17 @@ EOF
         
         print_status "Wallet setup and configuration complete!"
         print_status "Your wallet address is: $wallet_address"
-        print_warning "Please make sure to backup your mnemonic phrase!"
+        print_warning "Please make sure to backup your seed phrase!"
         
-        # Ask for confirmation that mnemonic is backed up
+        # Ask for confirmation that seed phrase is backed up
         while true; do
-            read -p "Have you backed up your mnemonic phrase? (Type YES to continue): " backup_confirmation
+            read -p "Have you backed up your seed phrase? (Type YES to continue): " backup_confirmation
             if [ "$backup_confirmation" = "YES" ]; then
-                print_status "Thank you for confirming your mnemonic backup"
+                print_status "Thank you for confirming your seed phrase backup"
                 break
             else
-                print_warning "Please backup your mnemonic phrase before continuing"
-                print_warning "Type YES when you have backed up your mnemonic phrase"
+                print_warning "Please backup your seed phrase before continuing"
+                print_warning "Type YES when you have backed up your seed phrase"
             fi
         done
         
@@ -632,6 +657,10 @@ setup_python_env
 
 # Get user input
 print_status "Gathering configuration information..."
+
+# Get provider domain name
+print_status "Provider Domain Information:"
+provider_name=$(get_input "Enter your provider domain name (e.g., example.com or test.example.com) Do not include "provider."" "" "[a-zA-Z0-9.-]+\.[a-zA-Z0-9.-]+")
 
 # Provider Information
 if $SELECTED_PROVIDER; then
@@ -691,6 +720,13 @@ if [ "$USE_EXISTING_HOSTS" = false ]; then
         node_info=$(get_node_info $i)
         nodes+=("$node_info")
     done
+fi
+
+# Get Tailscale auth key if Tailscale is selected
+if $SELECTED_TAILSCALE; then
+    print_status "Tailscale Setup:"
+    read -p "Enter your Tailscale auth key: " tailscale_authkey
+    echo "Using Tailscale auth key: ${tailscale_authkey:0:8}..."
 fi
 
 # Create necessary directories
@@ -1098,7 +1134,7 @@ else
 fi
 
 # Run provider playbooks if any are selected
-if $SELECTED_OS || $SELECTED_GPU || $SELECTED_PROVIDER || $SELECTED_TAILSCALE || $SELECTED_OP; then
+if $SELECTED_OS || $SELECTED_GPU || $SELECTED_PROVIDER || $SELECTED_TAILSCALE; then
     # Ensure we're in the provider-playbooks directory
     cd ~/provider-playbooks
     
@@ -1127,12 +1163,6 @@ if $SELECTED_OS || $SELECTED_GPU || $SELECTED_PROVIDER || $SELECTED_TAILSCALE ||
     if $SELECTED_TAILSCALE; then
         print_status "Running Tailscale playbook..."
         ansible-playbook -i ~/kubespray/inventory/akash/hosts.yaml playbooks.yml -t tailscale -v
-    fi
-    
-    # Run 1Password playbook if selected
-    if $SELECTED_OP; then
-        print_status "Running 1Password playbook..."
-        ansible-playbook -i ~/kubespray/inventory/akash/hosts.yaml playbooks.yml -t op -v
     fi
 else
     print_status "No provider playbooks were selected to run"
