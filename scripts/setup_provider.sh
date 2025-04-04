@@ -86,6 +86,30 @@ print_menu_item() {
     echo -e "${BLUE}[$1]${NC} $2"
 }
 
+# Function to get user input with validation
+get_input() {
+    local prompt=$1
+    local default=$2
+    local pattern=$3
+    local input
+    
+    while true; do
+        if [ -n "$default" ]; then
+            read -p "$prompt [$default]: " input
+            input=${input:-$default}
+        else
+            read -p "$prompt: " input
+        fi
+        
+        if [ -z "$pattern" ] || [[ $input =~ $pattern ]]; then
+            echo "$input"
+            return 0
+        else
+            print_error "Invalid input. Please try again."
+        fi
+    done
+}
+
 # Welcome banner
 display_welcome() {
     clear
@@ -215,6 +239,17 @@ select_playbooks() {
 # Run the menu and get selections
 select_playbooks
 
+# Get provider domain name
+print_status "Provider Domain Information:"
+provider_name=$(get_input "Enter your provider domain name (e.g., example.com or test.example.com) Do not include "provider."" "" "[a-zA-Z0-9.-]+\.[a-zA-Z0-9.-]+")
+
+# Get Tailscale auth key if Tailscale is selected
+if $SELECTED_TAILSCALE; then
+    print_status "Tailscale Setup:"
+    read -p "Enter your Tailscale auth key: " tailscale_authkey
+    echo "Using Tailscale auth key: ${tailscale_authkey:0:8}..."
+fi
+
 # Function to check prerequisites
 check_prerequisites() {
     print_status "Checking prerequisites..."
@@ -227,6 +262,11 @@ check_prerequisites() {
         "ssh-keygen"
         "openssl"
         "yq"
+    )
+    
+    # Required packages
+    local required_packages=(
+        "python3-kubernetes"
     )
     
     # Run apt-get update once at the beginning
@@ -266,6 +306,19 @@ check_prerequisites() {
         fi
     done
     
+    # Install required packages
+    for pkg in "${required_packages[@]}"; do
+        if ! dpkg -l | grep -q "$pkg"; then
+            print_status "Installing $pkg..."
+            run_with_spinner "apt-get install -y $pkg" "Installing $pkg"
+            if ! dpkg -l | grep -q "$pkg"; then
+                print_error "$pkg installation failed"
+                print_error "Please install $pkg manually before continuing"
+                exit 1
+            fi
+        fi
+    done
+    
     print_status "All prerequisites met"
 }
 
@@ -277,7 +330,7 @@ setup_python_env() {
     run_with_spinner "apt-get update" "Updating package lists"
     
     # Install system packages
-    run_with_spinner "apt-get install -y python3-virtualenv python3-pip" "Installing Python packages"
+    run_with_spinner "apt-get install -y python3-virtualenv python3-pip python3-kubernetes" "Installing Python packages"
     
     # Clone Kubespray if not exists
     cd ~
@@ -296,7 +349,9 @@ setup_python_env() {
         source venv/bin/activate
         run_with_spinner "pip3 install -r requirements.txt" "Installing Kubespray requirements"
         run_with_spinner "pip3 install ruamel.yaml" "Installing ruamel.yaml"
-        run_with_spinner "pip3 install kubernetes" "Installing Kubernetes Python module"
+        
+        # Note: We also need the kubernetes module in the system Python
+        print_status "Note: The kubernetes module is installed system-wide via python3-kubernetes package"
     else
         source venv/bin/activate
     fi
@@ -308,36 +363,6 @@ setup_python_env() {
     fi
     
     print_status "Python environment setup complete"
-}
-
-# Function to get user input with validation
-get_input() {
-    local prompt=$1
-    local default=$2
-    local validation=$3
-    local input
-
-    while true; do
-        if [ -n "$default" ]; then
-            read -p "$prompt [$default]: " input
-            input=${input:-$default}
-        else
-            read -p "$prompt: " input
-        fi
-
-        if [ -n "$validation" ]; then
-            if [[ $input =~ $validation ]]; then
-                break
-            else
-                print_error "Invalid input: '$input' does not match pattern '$validation'"
-                print_error "Please try again."
-            fi
-        else
-            break
-        fi
-    done
-
-    echo "$input"
 }
 
 # Function to validate IP address
@@ -498,9 +523,6 @@ setup_wallet() {
         return 1
     fi
     
-    # Debug output
-    print_status "Debug: Wallet address before file creation: $wallet_address"
-    
     # Small delay to ensure key operations are complete
     sleep 1
     
@@ -522,9 +544,6 @@ setup_wallet() {
         # Create host_vars directory if it doesn't exist
         mkdir -p /root/provider-playbooks/host_vars
 
-        # Debug output before file creation
-        print_status "Debug: Creating host_vars file with wallet address: $wallet_address"
-
         # Update the host_vars file with the wallet information
         cat > /root/provider-playbooks/host_vars/node1.yml << EOF
 # Node Configuration - Host Vars File
@@ -543,17 +562,26 @@ host: "akash"
 organization: "${provider_organization}"
 email: "${provider_email}"
 website: "${provider_website}"
+
+## Tailscale Configuration
+tailscale_hostname: "node1-$(echo "${provider_name}" | tr '.' '-')"
+tailscale_authkey: "${tailscale_authkey}"
+
+# provider attributes
+attributes:
+  - key: host
+    value: akash
+  - key: tier
+    value: community
+
+## Notes:
+# - Replace empty values with your actual configuration
+# - Keep sensitive values secure and never share them publicly
+# - Ensure domain format follows Akash naming conventions
 EOF
         
-        # Verify the file was created with the correct content
-        if [ -f "/root/provider-playbooks/host_vars/node1.yml" ]; then
-            print_status "Debug: Verifying host_vars file content..."
-            cat /root/provider-playbooks/host_vars/node1.yml
-        else
-            print_error "Failed to create host_vars file"
-            return 1
-        fi
-        
+
+    
         print_status "Key has been encoded and saved to /root/provider-playbooks/host_vars/node1.yml"
         print_status "Wallet address: $wallet_address"
         
@@ -608,7 +636,6 @@ print_status "Gathering configuration information..."
 # Provider Information
 if $SELECTED_PROVIDER; then
     print_status "Provider Information:"
-    provider_name=$(get_input "Enter your provider name (e.g., provider.example.com)" "" "[a-zA-Z0-9.-]+\.[a-zA-Z0-9.-]+")
     provider_region=$(get_input "Enter your provider region (e.g., us-west)" "" "[a-z0-9-]+")
     provider_organization=$(get_input "Enter your organization name" "" "[a-zA-Z0-9\s-]+")
     provider_email=$(get_input "Enter your contact email" "" "[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")
@@ -622,7 +649,6 @@ if $SELECTED_PROVIDER; then
     fi
 else
     # Set default values for provider variables if provider playbook is not selected
-    provider_name=""
     provider_region=""
     provider_organization=""
     provider_email=""
@@ -786,6 +812,8 @@ print_status "Creating host variables files..."
 for i in "${!nodes[@]}"; do
     node_num=$((i + 1))
     if [ "$node_num" != "1" ]; then
+        # Transform domain name for Tailscale hostname (replace dots with hyphens)
+        tailscale_domain=$(echo "${provider_name}" | tr '.' '-')
         cat > "host_vars/node${node_num}.yml" << EOF
 # Node Configuration - Host Vars File
 
@@ -795,6 +823,10 @@ region: "${provider_region}"
 ## Organization Details
 host: "akash"
 organization: "${provider_organization}"
+
+## Tailscale Configuration
+tailscale_hostname: "node${node_num}-${tailscale_domain}"
+tailscale_authkey: "${tailscale_authkey}"
 EOF
     fi
 done
@@ -1051,7 +1083,6 @@ print_status "Initial setup complete! Now proceeding with wallet setup..."
 # After verifying hosts configuration
 print_status "Hosts configuration verified"
 
-
 # Run the playbook
 print_status "Running playbooks based on your selections..."
 
@@ -1070,8 +1101,9 @@ fi
 if $SELECTED_OS || $SELECTED_GPU || $SELECTED_PROVIDER || $SELECTED_TAILSCALE || $SELECTED_OP; then
     # Ensure we're in the provider-playbooks directory
     cd ~/provider-playbooks
-
-
+    
+    # Activate the virtual environment
+    source ~/kubespray/venv/bin/activate
     
     # Run OS playbook if selected
     if $SELECTED_OS; then
