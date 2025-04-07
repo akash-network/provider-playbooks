@@ -1,13 +1,6 @@
 # Akash Provider Playbooks
 
-# WIP
-
-### Have not tested op or tailscale book yet, going to add shimpas rook-ceph book soon too
-
-
-
 This repository contains Ansible playbooks for setting up and managing an Akash Provider node.
-- **Secrets Management:** Integration of 1Password Secrets Management into the provider build playbooks.
 - **GPU Support:** Installation of NVIDIA GPU drivers and runtime components.
 - **Networking:** Deployment of Tailscale via custom Ansible playbooks.
 - **Provider:** Deployment of Akash Provider.
@@ -16,10 +9,12 @@ This repository contains Ansible playbooks for setting up and managing an Akash 
 
 ## Prerequisites
 
+### System Requirements
 - Ansible 2.9+
 - Python 3.6+
 - SSH access to target nodes
 - Root or sudo access on target nodes
+- Ubuntu 24.04 LTS
 
 ## Required Information
 
@@ -37,11 +32,19 @@ Before running the setup script, prepare the following information:
    - IP addresses for each node
    - SSH credentials for each node
 
-3. **Wallet Options**
+3. **Storage Configuration** (if using Rook-Ceph)
+   - Storage device names (e.g., /dev/sdb, /dev/nvme0n1)
+   - Number of OSDs per device
+   - Storage device type (HDD/SSD/NVMe)
+   - Storage node selection
+
+4. **Wallet Options**
    - Choose one of:
      - Create a new wallet (recommended for new providers)
      - Import an existing wallet key file
      - Import an existing wallet using mnemonic phrase
+     - Paste existing AKT address and encrypted key (for existing providers)
+       - Note: The key and key secret must be already base64 encoded and encrypted
 
 ## Installation
 
@@ -67,7 +70,7 @@ The setup script will guide you through selecting which playbooks to run:
 - **GPU**: NVIDIA driver and container toolkit installation
 - **Provider**: Akash Provider service installation
 - **Tailscale**: VPN setup for secure remote access
-- **1Password**: Secrets management integration
+- **Rook-Ceph**: Storage operator installation and configuration
 
 ## Manual Execution
 
@@ -77,15 +80,13 @@ If you need to run playbooks manually:
 # Run all playbooks
 ansible-playbook -i inventory/hosts.yaml playbooks.yml
 
-
 # Run specific playbooks using tags
 ansible-playbook -i inventory/hosts.yaml playbooks.yml -t os,provider,gpu
-
+```
 
 ## Troubleshooting
 
 Common issues and solutions:
-
 
 1. **SSH Connection Issues**
    - Ensure SSH keys are properly set up
@@ -102,8 +103,13 @@ Common issues and solutions:
    - Verify network connectivity
    - Review provider logs
 
-## Support
+4. **Storage Issues**
+   - Verify storage devices are clean and available
+   - Check storage node resources
+   - Review Ceph operator logs
+   - Ensure proper network connectivity between storage nodes
 
+## Support
 
 For support, please:
 - Check the [Akash Documentation](https://docs.akash.network)
