@@ -132,6 +132,7 @@ select_playbooks() {
     SELECTED_GPU=true
     SELECTED_PROVIDER=true
     SELECTED_TAILSCALE=true
+    SELECTED_ROOK_CEPH=false  # New variable for Rook-Ceph
     
     # Define playbook explanations
     KUBESPRAY_DESC="Kubernetes installation using Kubespray (required for a new cluster)"
@@ -139,6 +140,7 @@ select_playbooks() {
     GPU_DESC="Will this cluster have one or more GPUs?"
     PROVIDER_DESC="Akash Provider service installation and configuration"
     TAILSCALE_DESC="Tailscale VPN for secure network access"
+    ROOK_CEPH_DESC="Rook-Ceph storage operator installation and configuration"
     
     display_welcome
     
@@ -200,6 +202,17 @@ select_playbooks() {
         esac
     done
     
+    # Rook-Ceph
+    while true; do
+        echo -n -e "${BLUE}[?]${NC} Install Rook-Ceph for storage management? [y/n]: "
+        read -r response
+        case $response in
+            [Yy]* ) SELECTED_ROOK_CEPH=true; break;;
+            [Nn]* ) SELECTED_ROOK_CEPH=false; break;;
+            * ) echo "Please answer y or n.";;
+        esac
+    done
+    
     # Confirm selections
     echo
     echo -e "${YELLOW}You have selected the following playbooks:${NC}"
@@ -209,6 +222,7 @@ select_playbooks() {
     if $SELECTED_GPU; then print_menu_item "✓" "GPU - ${GPU_DESC}"; else print_menu_item "✗" "GPU - ${GPU_DESC}"; fi
     if $SELECTED_PROVIDER; then print_menu_item "✓" "Provider - ${PROVIDER_DESC}"; else print_menu_item "✗" "Provider - ${PROVIDER_DESC}"; fi
     if $SELECTED_TAILSCALE; then print_menu_item "✓" "Tailscale - ${TAILSCALE_DESC}"; else print_menu_item "✗" "Tailscale - ${TAILSCALE_DESC}"; fi
+    if $SELECTED_ROOK_CEPH; then print_menu_item "✓" "Rook-Ceph - ${ROOK_CEPH_DESC}"; else print_menu_item "✗" "Rook-Ceph - ${ROOK_CEPH_DESC}"; fi
     
     echo
     while true; do
@@ -720,6 +734,183 @@ if [ "$USE_EXISTING_HOSTS" = false ]; then
         node_info=$(get_node_info $i)
         nodes+=("$node_info")
     done
+    
+    # Configure Rook-Ceph if selected
+    if $SELECTED_ROOK_CEPH; then
+        print_status "Configuring Rook-Ceph storage..."
+        
+        # Use existing node names for storage selection
+        storage_nodes=()
+        echo -e "${YELLOW}Select which nodes will be used for Rook-Ceph storage:${NC}"
+        for i in $(seq 1 $num_nodes); do
+            node_ip=$(echo ${nodes[$i-1]} | cut -d'|' -f1)
+            while true; do
+                echo -n -e "${BLUE}[?]${NC} Use node$i ($node_ip) for persistent storage? [y/n]: "
+                read -r response
+                case $response in
+                    [Yy]* ) storage_nodes+=("node$i"); break;;
+                    [Nn]* ) break;;
+                    * ) echo "Please answer y or n.";;
+                esac
+            done
+        done
+        
+        # Confirm at least one storage node was selected
+        if [ ${#storage_nodes[@]} -eq 0 ]; then
+            print_error "At least one storage node must be selected for Rook-Ceph"
+            while true; do
+                echo -n -e "${BLUE}[?]${NC} Continue with Rook-Ceph setup? [y/n]: "
+                read -r response
+                case $response in
+                    [Yy]* ) 
+                        # Ask for at least one node again
+                        for i in $(seq 1 $num_nodes); do
+                            node_ip=$(echo ${nodes[$i-1]} | cut -d'|' -f1)
+                            while true; do
+                                echo -n -e "${BLUE}[?]${NC} Use node$i ($node_ip) for persistent storage? [y/n]: "
+                                read -r response
+                                case $response in
+                                    [Yy]* ) storage_nodes+=("node$i"); break;;
+                                    [Nn]* ) break;;
+                                    * ) echo "Please answer y or n.";;
+                                esac
+                            done
+                            # Break out once at least one node is selected
+                            if [ ${#storage_nodes[@]} -gt 0 ]; then
+                                break
+                            fi
+                        done
+                        break;;
+                    [Nn]* ) 
+                        print_warning "Continuing without Rook-Ceph configuration"
+                        SELECTED_ROOK_CEPH=false
+                        break;;
+                    * ) echo "Please answer y or n.";;
+                esac
+            done
+        fi
+        
+        # Only continue if Rook-Ceph is still selected
+        if $SELECTED_ROOK_CEPH; then
+            # Get storage device information
+            device_names=$(get_input "What are the device names to use (e.g., sd*, nvme*)?" "sd*" "[a-zA-Z0-9*]+")
+            osds_per_device=$(get_input "How many OSDs per device?" "1" "^[0-9]+$")
+            
+            # Storage device type selection
+            while true; do
+                echo -n -e "${BLUE}[?]${NC} What type of storage device (hdd/ssd/nvme)? [hdd]: "
+                read -r response
+                case $response in
+                    hdd|ssd|nvme) storage_device_type=$response; break;;
+                    "") storage_device_type="hdd"; break;;
+                    * ) echo "Please answer hdd, ssd, or nvme.";;
+                esac
+            done
+            
+            # ZFS Configuration
+            while true; do
+                echo -n -e "${BLUE}[?]${NC} Do your worker nodes use ZFS for ephemeral storage? [y/n]: "
+                read -r response
+                case $response in
+                    [Yy]* ) zfs_for_ephemeral="true"; break;;
+                    [Nn]* ) zfs_for_ephemeral="false"; break;;
+                    * ) echo "Please answer y or n.";;
+                esac
+            done
+            
+            # Use the consistent kubelet path that matches our ephemeral storage configuration
+            kubelet_dir_path="/data/kubelet"
+            
+            # Create Rook-Ceph defaults file
+            mkdir -p ~/provider-playbooks/roles/rook-ceph/defaults
+
+            # Determine MON and MGR counts based on number of storage nodes
+            if [ ${#storage_nodes[@]} -eq 1 ]; then
+                mon_count=1
+                mgr_count=1
+                pool_size=$((osds_per_device + 1))
+                min_size=2
+                failure_domain="osd"
+            elif [ ${#storage_nodes[@]} -eq 2 ]; then
+                mon_count=2
+                mgr_count=2
+                pool_size=3
+                min_size=2
+                failure_domain="host"
+            else
+                mon_count=3
+                mgr_count=2
+                pool_size=3
+                min_size=2
+                failure_domain="host"
+            fi
+
+            # Determine storage class based on device type
+            if [ "$storage_device_type" == "ssd" ]; then
+                storage_class="rook-ceph-block-ssd"
+            elif [ "$storage_device_type" == "nvme" ]; then
+                storage_class="rook-ceph-block-nvme"
+            else
+                storage_class="rook-ceph-block-hdd"
+            fi
+
+            cat > ~/provider-playbooks/roles/rook-ceph/defaults/main.yaml << EOF
+rook_ceph_namespace: rook-ceph
+rook_ceph_version: "1.16.6"
+
+# Ceph cluster configuration
+pool_size: $pool_size
+min_size: $min_size
+mon_count: $mon_count
+mgr_count: $mgr_count
+
+# Storage configuration
+device_filter: "$device_names"
+osds_per_device: $osds_per_device
+device_type: "$storage_device_type"
+failure_domain: "$failure_domain"
+storage_class: "$storage_class"
+zfs_for_ephemeral: "$zfs_for_ephemeral"
+kubelet_dir_path: "$kubelet_dir_path"
+
+# Node configuration
+storage_nodes: [${storage_nodes[*]}]
+EOF
+            
+            # Create host_vars for storage nodes
+            for node in "${storage_nodes[@]}"; do
+                mkdir -p /root/provider-playbooks/host_vars
+                if [ -f "/root/provider-playbooks/host_vars/${node}.yml" ]; then
+                    # If file exists, append to it
+                    cat >> "/root/provider-playbooks/host_vars/${node}.yml" << EOF
+
+# Rook-Ceph Storage Configuration
+rook_ceph_kubelet_dir_path: "$kubelet_dir_path"
+rook_ceph_storage:
+  device_names: "$device_names"
+  osds_per_device: $osds_per_device
+  device_type: "$storage_device_type"
+  zfs_for_ephemeral: "$zfs_for_ephemeral"
+EOF
+                else
+                    # Create new file
+                    cat > "/root/provider-playbooks/host_vars/${node}.yml" << EOF
+# Node Configuration - Rook-Ceph Storage
+
+rook_ceph_kubelet_dir_path: "$kubelet_dir_path"
+rook_ceph_storage:
+  device_names: "$device_names"
+  osds_per_device: $osds_per_device
+  device_type: "$storage_device_type"
+  zfs_for_ephemeral: "$zfs_for_ephemeral"
+EOF
+                fi
+            done
+            
+            print_status "Rook-Ceph configuration saved"
+            print_warning "Please ensure your storage nodes have the specified devices available"
+        fi
+    fi
 fi
 
 # Get Tailscale auth key if Tailscale is selected
@@ -727,12 +918,32 @@ if $SELECTED_TAILSCALE; then
     print_status "Tailscale Setup:"
     read -p "Enter your Tailscale auth key: " tailscale_authkey
     echo "Using Tailscale auth key: ${tailscale_authkey:0:8}..."
+    
+    # Create host_vars directory if it doesn't exist
+    mkdir -p /root/provider-playbooks/host_vars
+    
+    # Update node1.yml with Tailscale configuration if it exists
+    if [ -f "/root/provider-playbooks/host_vars/node1.yml" ]; then
+        # If the file exists, check if tailscale_authkey is already set
+        if ! grep -q "tailscale_authkey:" "/root/provider-playbooks/host_vars/node1.yml"; then
+            # Add Tailscale configuration if it doesn't exist
+            cat >> "/root/provider-playbooks/host_vars/node1.yml" << EOF
+
+## Tailscale Configuration
+tailscale_hostname: "node1-$(echo "${provider_name}" | tr '.' '-')"
+tailscale_authkey: "${tailscale_authkey}"
+EOF
+        else
+            # Update existing Tailscale configuration
+            sed -i "s|tailscale_authkey:.*|tailscale_authkey: \"${tailscale_authkey}\"|" "/root/provider-playbooks/host_vars/node1.yml"
+        fi
+    fi
 fi
 
 # Create necessary directories
 print_status "Creating required directories..."
-mkdir -p host_vars
-mkdir -p inventory/akash
+mkdir -p /root/provider-playbooks/host_vars
+mkdir -p /root/provider-playbooks/inventory/akash
 
 # Function to copy inventory
 copy_inventory() {
@@ -850,7 +1061,7 @@ for i in "${!nodes[@]}"; do
     if [ "$node_num" != "1" ]; then
         # Transform domain name for Tailscale hostname (replace dots with hyphens)
         tailscale_domain=$(echo "${provider_name}" | tr '.' '-')
-        cat > "host_vars/node${node_num}.yml" << EOF
+        cat > "/root/provider-playbooks/host_vars/node${node_num}.yml" << EOF
 # Node Configuration - Host Vars File
 
 ## Network Configuration
@@ -1025,7 +1236,7 @@ cat > ~/kubespray/cluster.yml << EOF
 
 - name: Run Akash provider setup
   import_playbook: /root/provider-playbooks/playbooks.yml
-  tags: os,provider,gpu,tailscale,op
+  tags: os,provider,gpu,tailscale,rook-ceph,op
   vars:
     ansible_roles_path: /root/provider-playbooks/roles
 EOF
@@ -1100,6 +1311,20 @@ containerd_additional_runtimes:
       BinaryName: '/usr/bin/nvidia-container-runtime'
 EOF
 
+# Configure Rook-Ceph in k8s-cluster.yml
+if $SELECTED_ROOK_CEPH; then
+    print_status "Configuring Rook-Ceph settings in k8s-cluster.yml..."
+    if ! grep -q "rook_ceph_enabled" ~/kubespray/inventory/akash/group_vars/k8s_cluster/k8s-cluster.yml; then
+        cat >> ~/kubespray/inventory/akash/group_vars/k8s_cluster/k8s-cluster.yml << EOF
+
+# Rook-Ceph configuration
+rook_ceph_enabled: true
+rook_ceph_namespace: "rook-ceph"
+rook_ceph_version: "1.16.6"
+EOF
+    fi
+fi
+
 # Configure DNS
 print_status "Configuring DNS..."
 if grep -q "^upstream_dns_servers:" ~/kubespray/inventory/akash/group_vars/all/all.yml; then
@@ -1134,7 +1359,7 @@ else
 fi
 
 # Run provider playbooks if any are selected
-if $SELECTED_OS || $SELECTED_GPU || $SELECTED_PROVIDER || $SELECTED_TAILSCALE; then
+if $SELECTED_OS || $SELECTED_GPU || $SELECTED_PROVIDER || $SELECTED_TAILSCALE || $SELECTED_ROOK_CEPH; then
     # Ensure we're in the provider-playbooks directory
     cd ~/provider-playbooks
     
@@ -1163,6 +1388,12 @@ if $SELECTED_OS || $SELECTED_GPU || $SELECTED_PROVIDER || $SELECTED_TAILSCALE; t
     if $SELECTED_TAILSCALE; then
         print_status "Running Tailscale playbook..."
         ansible-playbook -i ~/kubespray/inventory/akash/hosts.yaml playbooks.yml -t tailscale -v
+    fi
+
+    # Run Rook-Ceph playbook if selected
+    if $SELECTED_ROOK_CEPH; then
+        print_status "Running Rook-Ceph playbook..."
+        ansible-playbook -i ~/kubespray/inventory/akash/hosts.yaml playbooks.yml -t rook-ceph -v
     fi
 else
     print_status "No provider playbooks were selected to run"

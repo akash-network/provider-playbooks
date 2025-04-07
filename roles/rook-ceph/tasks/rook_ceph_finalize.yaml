@@ -2,7 +2,7 @@
 # this is not needed - i dont see the file rook-ceph-cluster.values.yml
 - name: Load rook-ceph values from file
   ansible.builtin.set_fact:
-    rook_ceph_values: "{{ lookup('file', role_path + '/rook-ceph-cluster.values.yml') | from_yaml }}"
+    rook_ceph_values: "{{ lookup('file', '/root/provider/rook-ceph-cluster.values.yml') | from_yaml }}"
 
 - name: Set storage class name from rook-ceph values
   ansible.builtin.set_fact:

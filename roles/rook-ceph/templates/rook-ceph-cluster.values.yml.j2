@@ -1,38 +1,42 @@
-operatorNamespace: rook-ceph
+operatorNamespace: {{ rook_ceph_namespace }}
 
 configOverride: |
   [global]
   osd_pool_default_pg_autoscale_mode = on
-  osd_pool_default_size = {{ .POOL_SIZE }}
-  osd_pool_default_min_size = {{ .MIN_SIZE }}
+  osd_pool_default_size = {{ pool_size }}
+  osd_pool_default_min_size = {{ min_size }}
 
 cephClusterSpec:
   resources:
   mon:
-    count: {{ .MON_COUNT }}
+    count: {{ mon_count }}
   mgr:
-    count: {{ .MGR_COUNT }}
+    count: {{ mgr_count }}
 
   storage:
     useAllNodes: false
     useAllDevices: false
-    deviceFilter: "{{ .DEVICE_FILTER }}"
+    deviceFilter: "{{ device_filter }}"
     config:
-      osdsPerDevice: "{{ .OSDS_PER_DEVICE }}"
+      osdsPerDevice: "{{ osds_per_device }}"
     nodes:
-{{ .NODE_LIST }}
+{% for node in storage_nodes %}
+    - name: "{{ node }}"
+      config:
+        storeType: "{{ 'bluestore' if device_type == 'ssd' or device_type == 'nvme' else 'filestore' }}"
+{% endfor %}
 cephBlockPools:
   - name: akash-deployments
     spec:
-      failureDomain: {{ .FAILURE_DOMAIN }}
+      failureDomain: {{ failure_domain }}
       replicated:
-        size: {{ .POOL_SIZE }}
+        size: {{ pool_size }}
       parameters:
-        min_size: "{{ .MIN_SIZE }}"
+        min_size: "{{ min_size }}"
         bulk: "true"
     storageClass:
       enabled: true
-      name: {{ .STORAGE_CLASS }}
+      name: {{ storage_class }}
       isDefault: true
       reclaimPolicy: Delete
       allowVolumeExpansion: true
@@ -43,11 +47,11 @@ cephBlockPools:
         imageFeatures: layering
         # The secrets contain Ceph admin credentials.
         csi.storage.k8s.io/provisioner-secret-name: rook-csi-rbd-provisioner
-        csi.storage.k8s.io/provisioner-secret-namespace: rook-ceph
+        csi.storage.k8s.io/provisioner-secret-namespace: {{ rook_ceph_namespace }}
         csi.storage.k8s.io/controller-expand-secret-name: rook-csi-rbd-provisioner
-        csi.storage.k8s.io/controller-expand-secret-namespace: rook-ceph
+        csi.storage.k8s.io/controller-expand-secret-namespace: {{ rook_ceph_namespace }}
         csi.storage.k8s.io/node-stage-secret-name: rook-csi-rbd-node
-        csi.storage.k8s.io/node-stage-secret-namespace: rook-ceph
+        csi.storage.k8s.io/node-stage-secret-namespace: {{ rook_ceph_namespace }}
         # Specify the filesystem type of the volume. If not specified, csi-provisioner
         # will set default as `ext4`. Note that `xfs` is not recommended due to potential deadlock
         # in hyperconverged settings where the volume is mounted on the same node as the osds.
