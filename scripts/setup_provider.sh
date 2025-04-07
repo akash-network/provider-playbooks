@@ -847,11 +847,11 @@ if [ "$USE_EXISTING_HOSTS" = false ]; then
 
             # Determine storage class based on device type
             if [ "$storage_device_type" == "ssd" ]; then
-                storage_class="rook-ceph-block-ssd"
+                storage_class="beta2"
             elif [ "$storage_device_type" == "nvme" ]; then
-                storage_class="rook-ceph-block-nvme"
+                storage_class="beta3"
             else
-                storage_class="rook-ceph-block-hdd"
+                storage_class="beta1"
             fi
 
             cat > ~/provider-playbooks/roles/rook-ceph/defaults/main.yaml << EOF
