@@ -672,9 +672,13 @@ setup_python_env
 # Get user input
 print_status "Gathering configuration information..."
 
-# Get provider domain name
-print_status "Provider Domain Information:"
-provider_name=$(get_input "Enter your provider domain name (e.g., example.com or test.example.com) Do not include "provider."" "" "[a-zA-Z0-9.-]+\.[a-zA-Z0-9.-]+")
+# Get provider domain name only if provider or tailscale is selected
+if $SELECTED_PROVIDER || $SELECTED_TAILSCALE; then
+    print_status "Provider Domain Information:"
+    provider_name=$(get_input "Enter your provider domain name (e.g., example.com or test.example.com) Do not include "provider."" "" "[a-zA-Z0-9.-]+\.[a-zA-Z0-9.-]+")
+else
+    provider_name=""
+fi
 
 # Provider Information
 if $SELECTED_PROVIDER; then
