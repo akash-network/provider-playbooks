@@ -137,7 +137,7 @@ select_playbooks() {
     # Define playbook explanations
     KUBESPRAY_DESC="Kubernetes installation using Kubespray (required for a new cluster)"
     OS_DESC="Basic OS configuration and optimizations"
-    GPU_DESC="Will this cluster have one or more GPUs?"
+    GPU_DESC="Are there GPU nodes in the cluster?"
     PROVIDER_DESC="Akash Provider service installation and configuration"
     TAILSCALE_DESC="Tailscale VPN for secure network access"
     ROOK_CEPH_DESC="Rook-Ceph storage operator installation and configuration"
@@ -171,7 +171,7 @@ select_playbooks() {
     
     # GPU
     while true; do
-        echo -n -e "${BLUE}[?]${NC} Is this a GPU node? (Will install NVIDIA drivers and container toolkit) [y/n]: "
+        echo -n -e "${BLUE}[?]${NC} Are there GPU nodes in the cluster? (Will install NVIDIA drivers and container toolkit) [y/n]: "
         read -r response
         case $response in
             [Yy]* ) SELECTED_GPU=true; break;;
