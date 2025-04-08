@@ -945,49 +945,23 @@ if $SELECTED_TAILSCALE; then
     # Create host_vars directory if it doesn't exist
     mkdir -p /root/provider-playbooks/host_vars
     
-    # Update all node configurations with Tailscale settings
-    for i in "${!nodes[@]}"; do
-        node_num=$((i + 1))
-        node_file="/root/provider-playbooks/host_vars/node${node_num}.yml"
-        
-        # Transform domain name for Tailscale hostname (replace dots with hyphens)
-        tailscale_domain=$(echo "${provider_name}" | tr '.' '-')
-        
-        if [ -f "$node_file" ]; then
-            # If the file exists, check if tailscale_authkey is already set
-            if ! grep -q "tailscale_authkey:" "$node_file"; then
-                # Add Tailscale configuration if it doesn't exist
-                cat >> "$node_file" << EOF
+    # Update node1.yml with Tailscale configuration if it exists
+    if [ -f "/root/provider-playbooks/host_vars/node1.yml" ]; then
+        # If the file exists, check if tailscale_authkey is already set
+        if ! grep -q "tailscale_authkey:" "/root/provider-playbooks/host_vars/node1.yml"; then
+            # Add Tailscale configuration if it doesn't exist
+            cat >> "/root/provider-playbooks/host_vars/node1.yml" << EOF
 
 ## Tailscale Configuration
-tailscale_hostname: "node${node_num}-${tailscale_domain}"
+tailscale_hostname: "node1-$(echo "${provider_name}" | tr '.' '-')"
 tailscale_authkey: "${tailscale_authkey}"
 EOF
-            else
-                # Update existing Tailscale configuration
-                sed -i "s|tailscale_authkey:.*|tailscale_authkey: \"${tailscale_authkey}\"|" "$node_file"
-                sed -i "s|tailscale_hostname:.*|tailscale_hostname: \"node${node_num}-${tailscale_domain}\"|" "$node_file"
-            fi
         else
-            # Create new file with Tailscale configuration
-            cat > "$node_file" << EOF
-# Node Configuration - Host Vars File
-
-## Network Configuration
-region: "${provider_region}"
-
-## Organization Details
-host: "akash"
-organization: "${provider_organization}"
-
-## Tailscale Configuration
-tailscale_hostname: "node${node_num}-${tailscale_domain}"
-tailscale_authkey: "${tailscale_authkey}"
-EOF
+            # Update existing Tailscale configuration
+            sed -i "s|tailscale_authkey:.*|tailscale_authkey: \"${tailscale_authkey}\"|" "/root/provider-playbooks/host_vars/node1.yml"
         fi
-    done
+    fi
 fi
-
 # Create necessary directories
 print_status "Creating required directories..."
 mkdir -p /root/provider-playbooks/host_vars
