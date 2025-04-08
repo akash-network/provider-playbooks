@@ -858,6 +858,19 @@ if [ "$USE_EXISTING_HOSTS" = false ]; then
                 storage_class="beta1"
             fi
 
+            # Create the nodes list with proper formatting
+            nodes_list=""
+            for node in "${storage_nodes[@]}"; do
+                if [ -z "$nodes_list" ]; then
+                    nodes_list="  - name: \"$node\"
+    config:"
+                else
+                    nodes_list="$nodes_list
+  - name: \"$node\"
+    config:"
+                fi
+            done
+
             cat > ~/provider-playbooks/roles/rook-ceph/defaults/main.yaml << EOF
 rook_ceph_namespace: rook-ceph
 rook_ceph_version: "1.16.6"
@@ -867,6 +880,12 @@ pool_size: $pool_size
 min_size: $min_size
 mon_count: $mon_count
 mgr_count: $mgr_count
+
+# Storage configuration
+config:
+  osdsPerDevice: "$osds_per_device"
+nodes:
+$nodes_list
 
 # Storage configuration
 device_filter: "$device_names"
@@ -926,22 +945,47 @@ if $SELECTED_TAILSCALE; then
     # Create host_vars directory if it doesn't exist
     mkdir -p /root/provider-playbooks/host_vars
     
-    # Update node1.yml with Tailscale configuration if it exists
-    if [ -f "/root/provider-playbooks/host_vars/node1.yml" ]; then
-        # If the file exists, check if tailscale_authkey is already set
-        if ! grep -q "tailscale_authkey:" "/root/provider-playbooks/host_vars/node1.yml"; then
-            # Add Tailscale configuration if it doesn't exist
-            cat >> "/root/provider-playbooks/host_vars/node1.yml" << EOF
+    # Update all node configurations with Tailscale settings
+    for i in "${!nodes[@]}"; do
+        node_num=$((i + 1))
+        node_file="/root/provider-playbooks/host_vars/node${node_num}.yml"
+        
+        # Transform domain name for Tailscale hostname (replace dots with hyphens)
+        tailscale_domain=$(echo "${provider_name}" | tr '.' '-')
+        
+        if [ -f "$node_file" ]; then
+            # If the file exists, check if tailscale_authkey is already set
+            if ! grep -q "tailscale_authkey:" "$node_file"; then
+                # Add Tailscale configuration if it doesn't exist
+                cat >> "$node_file" << EOF
 
 ## Tailscale Configuration
-tailscale_hostname: "node1-$(echo "${provider_name}" | tr '.' '-')"
+tailscale_hostname: "node${node_num}-${tailscale_domain}"
 tailscale_authkey: "${tailscale_authkey}"
 EOF
+            else
+                # Update existing Tailscale configuration
+                sed -i "s|tailscale_authkey:.*|tailscale_authkey: \"${tailscale_authkey}\"|" "$node_file"
+                sed -i "s|tailscale_hostname:.*|tailscale_hostname: \"node${node_num}-${tailscale_domain}\"|" "$node_file"
+            fi
         else
-            # Update existing Tailscale configuration
-            sed -i "s|tailscale_authkey:.*|tailscale_authkey: \"${tailscale_authkey}\"|" "/root/provider-playbooks/host_vars/node1.yml"
+            # Create new file with Tailscale configuration
+            cat > "$node_file" << EOF
+# Node Configuration - Host Vars File
+
+## Network Configuration
+region: "${provider_region}"
+
+## Organization Details
+host: "akash"
+organization: "${provider_organization}"
+
+## Tailscale Configuration
+tailscale_hostname: "node${node_num}-${tailscale_domain}"
+tailscale_authkey: "${tailscale_authkey}"
+EOF
         fi
-    fi
+    done
 fi
 
 # Create necessary directories
@@ -1401,4 +1445,52 @@ if $SELECTED_OS || $SELECTED_GPU || $SELECTED_PROVIDER || $SELECTED_TAILSCALE ||
     fi
 else
     print_status "No provider playbooks were selected to run"
-fi 
+fi
+
+# Check if all playbooks completed successfully
+print_status "Checking if all playbooks completed successfully..."
+
+# Function to reboot nodes in reverse order
+reboot_nodes() {
+    print_status "Rebooting nodes in reverse order..."
+    
+    # Get the number of nodes
+    local num_nodes=${#nodes[@]}
+    
+    # Reboot nodes in reverse order
+    for ((i=num_nodes-1; i>=0; i--)); do
+        node_num=$((i + 1))
+        node_ip=$(echo ${nodes[$i]} | cut -d'|' -f1)
+        node_user=$(echo ${nodes[$i]} | cut -d'|' -f2)
+        node_port=$(echo ${nodes[$i]} | cut -d'|' -f3)
+        
+        print_status "Rebooting node${node_num} (${node_user}@${node_ip}:${node_port})..."
+        ssh -o StrictHostKeyChecking=no -p ${node_port} ${node_user}@${node_ip} "reboot" || print_warning "Failed to reboot node${node_num}, but continuing with other nodes"
+        
+        # Wait a moment before proceeding to the next node
+        sleep 2
+    done
+    
+    print_status "All nodes have been sent reboot commands"
+    print_warning "The nodes will reboot in sequence. You may need to wait a few minutes before they are all back online."
+}
+
+# Ask user if they want to reboot all nodes
+while true; do
+    echo -n -e "${BLUE}[?]${NC} Would you like to reboot all nodes now? [y/n]: "
+    read -r response
+    case $response in
+        [Yy]* ) 
+            reboot_nodes
+            break
+            ;;
+        [Nn]* ) 
+            print_status "Skipping node reboot"
+            break
+            ;;
+        * ) echo "Please answer y or n.";;
+    esac
+done
+
+print_status "Setup process completed!"
+print_status "Thank you for using the Akash Provider Setup Script!" 

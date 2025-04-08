@@ -20,7 +20,8 @@ cephClusterSpec:
     config:
       osdsPerDevice: "{{ osds_per_device }}"
     nodes:
-{% for node in storage_nodes %}
+{% set nodes = storage_nodes | replace('[', '') | replace(']', '') | replace("'", '') | trim() %}
+{% for node in nodes.split() %}
     - name: "{{ node }}"
       config:
         storeType: "{{ 'bluestore' if device_type == 'ssd' or device_type == 'nvme' else 'filestore' }}"
