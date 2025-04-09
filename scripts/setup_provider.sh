@@ -256,6 +256,7 @@ check_prerequisites() {
     # Required packages
     local required_packages=(
         "python3-kubernetes"
+        "jq"
     )
     
     # Run apt-get update once at the beginning
