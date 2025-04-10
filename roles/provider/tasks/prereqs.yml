@@ -14,7 +14,7 @@
   environment:
     HELM_INSTALL_VERSION: "{{ helm_install_version }}"
   ansible.builtin.command: /tmp/get_helm.sh
-  when: helm_version.stdout is not defined or 'v3.17.2' not in helm_version.stdout
+  when: helm_version.stdout is not defined or 'v3.17.3' not in helm_version.stdout
 
 - name: Remove Akash Helm repository if it exists
   kubernetes.core.helm_repository:
