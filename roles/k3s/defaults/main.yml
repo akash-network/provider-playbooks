@@ -1,0 +1,10 @@
+---
+# K3s and Calico defaults
+k3s_version_channel: latest
+disable_components: "traefik"
+k3s_flannel_backend: "none"
+kubelet_root_dir: "/data/kubelet"
+k3s_data_dir: "/data/k3s"
+calico_version: "v3.28.2"
+calico_manifest_url: "https://raw.githubusercontent.com/projectcalico/calico/refs/tags/{{ calico_version }}/manifests/calico.yaml"
+scheduler_config_path: "{{ k3s_data_dir }}/server/etc/scheduler-config.yaml"

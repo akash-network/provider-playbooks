@@ -1,0 +1,40 @@
+---
+- name: Download Calico manifest
+  get_url:
+    url: "{{ calico_manifest_url }}"
+    dest: "/tmp/calico.yaml"
+    mode: '0644'
+
+- name: Install the Go-based yq
+  shell: |
+    wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/local/bin/yq
+    chmod +x /usr/local/bin/yq
+  args:
+    creates: /usr/local/bin/yq
+
+- name: Modify Calico manifest to set IP autodetection method
+  shell: |
+    /usr/local/bin/yq eval-all '(select(.kind == "DaemonSet" and .metadata.name == "calico-node").spec.template.spec.containers[] | select(.name == "calico-node").env) += {"name": "IP_AUTODETECTION_METHOD", "value": "kubernetes-internal-ip"}' -i /tmp/calico.yaml
+  args:
+    executable: /bin/bash
+
+- name: Apply Calico manifest
+  shell: kubectl apply -f /tmp/calico.yaml
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+  register: calico_result
+  until: calico_result.rc == 0
+  retries: 5
+  delay: 10
+
+- name: Wait for Calico pods to be ready
+  shell: kubectl wait --for=condition=Ready pods --all -n kube-system --timeout=300s
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+  register: wait_result
+  until: wait_result.rc == 0
+  retries: 10
+  delay: 30
+
+- name: Apply coredns patch
+  import_tasks: coredns.yml

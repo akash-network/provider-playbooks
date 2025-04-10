@@ -1,0 +1,63 @@
+- name: Set facts for K3s installation
+  set_fact:
+    k3s_common_args: "--disable={{ disable_components }} --flannel-backend={{ k3s_flannel_backend }}"
+    nodefs_dir: "--kubelet-arg=root-dir={{ kubelet_root_dir }}"
+    imagefs_dir: "--data-dir={{ k3s_data_dir }}"
+    cluster_init: "--cluster-init"
+    tls_san_arg: "{% if tls_san is defined %}--tls-san={{ tls_san }}{% endif %}"
+    scheduler_config: "{% if scheduler_config_path is defined %}--kube-scheduler-arg=config={{ scheduler_config_path }}{% endif %}"
+
+- name: Ensure directory exists for scheduler config
+  file:
+    path: "{{ k3s_data_dir }}/server/etc"
+    state: directory
+    mode: '0755'
+
+- name: Copy scheduler configuration file
+  template:
+    src: "scheduler-config.yaml"
+    dest: "{{ k3s_data_dir }}/server/etc/scheduler-config.yaml"
+    mode: '0644'    
+
+- name: Ensure directory exists for scheduler credentials
+  file:
+    path: "{{ k3s_data_dir }}/server/cred"
+    state: directory
+    mode: '0700'
+
+- name: Copy scheduler kubeconfig file
+  template:
+    src: "scheduler.kubeconfig"
+    dest: "{{ k3s_data_dir }}/server/cred/scheduler.kubeconfig"
+    mode: '0600'
+
+- name: Install K3s server
+  command: >
+    /bin/bash -c "curl -sfL https://get.k3s.io | 
+    INSTALL_K3S_CHANNEL={{ k3s_version_channel }} 
+    INSTALL_K3S_EXEC='server {{ k3s_common_args }} 
+    {{ cluster_init }} 
+    --node-ip={{ internal_ip }} 
+    {{ tls_san_arg }} 
+    {{ nodefs_dir }} 
+    {{ imagefs_dir }}
+    {{ scheduler_config }}' sh -"
+  args:
+    creates: /usr/local/bin/k3s
+  register: k3s_install
+  changed_when: k3s_install.rc == 0
+  notify: restart k3s
+
+- name: Wait for K3s to be ready
+  wait_for:
+    path: /etc/rancher/k3s/k3s.yaml
+    delay: 5
+    timeout: 300
+
+- name: Create .kube directory
+  file:
+    path: "/home/{{ ansible_user }}/.kube"
+    state: directory
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: '0755'

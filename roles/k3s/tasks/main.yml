@@ -1,0 +1,22 @@
+---
+- name: import K3s installation tasks
+  import_tasks: prechecks.yml
+  when: inventory_hostname in groups['control_plane']  
+
+- name: import K3s installation tasks
+  import_tasks: k3s-master.yml
+  when: inventory_hostname in groups['control_plane']
+
+- name: import Calico installation tasks
+  import_tasks: calico.yml
+  when: inventory_hostname in groups['control_plane']
+
+- name: import K3s Worker tasks
+  import_tasks: k3s-worker.yml
+  when: inventory_hostname in groups['workers']
+
+
+# master:
+# #ansible-playbook -i inventory k3s_playbook.yml -e 'host=34.57.255.229 internal_ip=10.128.0.32' -vv
+
+# worker:

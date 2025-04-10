@@ -1,0 +1,23 @@
+- name: Extract first two octets of the internal network
+  set_fact:
+    internal_network: "{{ internal_ip.split('/')[0].split('.')[:2] | join('.') }}"
+
+- name: Show extracted network prefix
+  debug:
+    msg: "Extracted network prefix: {{ internal_network }}"
+
+- debug:
+    var: ansible_facts['all_ipv4_addresses']
+
+- name: Check if specific IP exists on this host
+  set_fact:
+    ip_exists: "{{ internal_ip in ansible_facts['all_ipv4_addresses'] }}"
+  
+- name: Display result of IP check
+  debug:
+    msg: "The IP {{ internal_ip }} {% if ip_exists %}exists{% else %}does not exist{% endif %} on this host."
+  
+- name: Fail if the specific IP is not found
+  fail:
+    msg: "The required IP address {{ internal_ip }} was not found on this host.Please enter the right Internal IP"
+  when: not ip_exists
