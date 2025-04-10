@@ -106,6 +106,8 @@ get_input() {
             return 0
         else
             print_error "Invalid input. Please try again."
+            # Clear the input variable to prevent error message from being stored
+            input=""
         fi
     done
 }
