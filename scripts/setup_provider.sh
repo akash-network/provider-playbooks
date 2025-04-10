@@ -137,7 +137,7 @@ select_playbooks() {
     # Define playbook explanations
     KUBESPRAY_DESC="Kubernetes installation using Kubespray (required for a new cluster)"
     OS_DESC="Basic OS configuration and optimizations"
-    GPU_DESC="Will this cluster have one or more GPUs?"
+    GPU_DESC="Are there GPU nodes in the cluster?"
     PROVIDER_DESC="Akash Provider service installation and configuration"
     TAILSCALE_DESC="Tailscale VPN for secure network access"
     ROOK_CEPH_DESC="Rook-Ceph storage operator installation and configuration"
@@ -171,7 +171,7 @@ select_playbooks() {
     
     # GPU
     while true; do
-        echo -n -e "${BLUE}[?]${NC} Is this a GPU node? (Will install NVIDIA drivers and container toolkit) [y/n]: "
+        echo -n -e "${BLUE}[?]${NC} Are there GPU nodes in the cluster? (Will install NVIDIA drivers and container toolkit) [y/n]: "
         read -r response
         case $response in
             [Yy]* ) SELECTED_GPU=true; break;;
@@ -672,9 +672,13 @@ setup_python_env
 # Get user input
 print_status "Gathering configuration information..."
 
-# Get provider domain name
-print_status "Provider Domain Information:"
-provider_name=$(get_input "Enter your provider domain name (e.g., example.com or test.example.com) Do not include "provider."" "" "[a-zA-Z0-9.-]+\.[a-zA-Z0-9.-]+")
+# Get provider domain name only if provider or tailscale is selected
+if $SELECTED_PROVIDER || $SELECTED_TAILSCALE; then
+    print_status "Provider Domain Information:"
+    provider_name=$(get_input "Enter your provider domain name (e.g., example.com or test.example.com) Do not include "provider."" "" "[a-zA-Z0-9.-]+\.[a-zA-Z0-9.-]+")
+else
+    provider_name=""
+fi
 
 # Provider Information
 if $SELECTED_PROVIDER; then
@@ -854,6 +858,19 @@ if [ "$USE_EXISTING_HOSTS" = false ]; then
                 storage_class="beta1"
             fi
 
+            # Create the nodes list with proper formatting
+            nodes_list=""
+            for node in "${storage_nodes[@]}"; do
+                if [ -z "$nodes_list" ]; then
+                    nodes_list="  - name: \"$node\"
+    config:"
+                else
+                    nodes_list="$nodes_list
+  - name: \"$node\"
+    config:"
+                fi
+            done
+
             cat > ~/provider-playbooks/roles/rook-ceph/defaults/main.yaml << EOF
 rook_ceph_namespace: rook-ceph
 rook_ceph_version: "1.16.6"
@@ -863,6 +880,12 @@ pool_size: $pool_size
 min_size: $min_size
 mon_count: $mon_count
 mgr_count: $mgr_count
+
+# Storage configuration
+config:
+  osdsPerDevice: "$osds_per_device"
+nodes:
+$nodes_list
 
 # Storage configuration
 device_filter: "$device_names"
@@ -939,7 +962,6 @@ EOF
         fi
     fi
 fi
-
 # Create necessary directories
 print_status "Creating required directories..."
 mkdir -p /root/provider-playbooks/host_vars
@@ -1325,16 +1347,26 @@ EOF
     fi
 fi
 
-# Configure DNS
 print_status "Configuring DNS..."
-if grep -q "^upstream_dns_servers:" ~/kubespray/inventory/akash/group_vars/all/all.yml; then
-    print_status "DNS already configured"
+
+DNS_FILE=~/kubespray/inventory/akash/group_vars/all/all.yml
+
+# 1. Uncomment the upstream_dns_servers line
+sed -i 's/^[[:space:]]*#\s*upstream_dns_servers:/upstream_dns_servers:/' "$DNS_FILE"
+
+# 2. Uncomment any lines containing 8.8.8.8 or 8.8.4.4
+sed -i 's/^[[:space:]]*#\s*-\s*8\.8\.8\.8/  - 8.8.8.8/' "$DNS_FILE"
+sed -i 's/^[[:space:]]*#\s*-\s*8\.8\.4\.4/  - 8.8.4.4/' "$DNS_FILE"
+
+# 3. Add 1.1.1.1 if it's not already present (commented or not)
+if ! grep -qE '^\s*- 1\.1\.1\.1' "$DNS_FILE"; then
+    # Add it right below upstream_dns_servers:
+    awk '/upstream_dns_servers:/ { print; print "  - 1.1.1.1"; next }1' "$DNS_FILE" > "${DNS_FILE}.tmp" && mv "${DNS_FILE}.tmp" "$DNS_FILE"
+    print_status "Added 1.1.1.1 to upstream DNS list"
 else
-    # Uncomment the upstream_dns_servers in all.yml
-    sed -i 's/^#upstream_dns_servers:/upstream_dns_servers:/' ~/kubespray/inventory/akash/group_vars/all/all.yml
-    sed -i 's/^#  - 8.8.8.8/  - 8.8.8.8/' ~/kubespray/inventory/akash/group_vars/all/all.yml
-    sed -i 's/^#  - 1.1.1.1/  - 1.1.1.1/' ~/kubespray/inventory/akash/group_vars/all/all.yml
+    print_status "1.1.1.1 already present in upstream DNS list"
 fi
+
 
 print_status "All configuration steps completed successfully!"
 
@@ -1397,4 +1429,52 @@ if $SELECTED_OS || $SELECTED_GPU || $SELECTED_PROVIDER || $SELECTED_TAILSCALE ||
     fi
 else
     print_status "No provider playbooks were selected to run"
-fi 
+fi
+
+# Check if all playbooks completed successfully
+print_status "Checking if all playbooks completed successfully..."
+
+# Function to reboot nodes in reverse order
+reboot_nodes() {
+    print_status "Rebooting nodes in reverse order..."
+    
+    # Get the number of nodes
+    local num_nodes=${#nodes[@]}
+    
+    # Reboot nodes in reverse order
+    for ((i=num_nodes-1; i>=0; i--)); do
+        node_num=$((i + 1))
+        node_ip=$(echo ${nodes[$i]} | cut -d'|' -f1)
+        node_user=$(echo ${nodes[$i]} | cut -d'|' -f2)
+        node_port=$(echo ${nodes[$i]} | cut -d'|' -f3)
+        
+        print_status "Rebooting node${node_num} (${node_user}@${node_ip}:${node_port})..."
+        ssh -o StrictHostKeyChecking=no -p ${node_port} ${node_user}@${node_ip} "reboot" || print_warning "Failed to reboot node${node_num}, but continuing with other nodes"
+        
+        # Wait a moment before proceeding to the next node
+        sleep 2
+    done
+    
+    print_status "All nodes have been sent reboot commands"
+    print_warning "The nodes will reboot in sequence. You may need to wait a few minutes before they are all back online."
+}
+
+# Ask user if they want to reboot all nodes
+while true; do
+    echo -n -e "${BLUE}[?]${NC} Would you like to reboot all nodes now? [y/n]: "
+    read -r response
+    case $response in
+        [Yy]* ) 
+            reboot_nodes
+            break
+            ;;
+        [Nn]* ) 
+            print_status "Skipping node reboot"
+            break
+            ;;
+        * ) echo "Please answer y or n.";;
+    esac
+done
+
+print_status "Setup process completed!"
+print_status "Thank you for using the Akash Provider Setup Script!" 
