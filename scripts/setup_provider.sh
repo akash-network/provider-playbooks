@@ -106,8 +106,6 @@ get_input() {
             return 0
         else
             print_error "Invalid input. Please try again."
-            # Clear the input variable to prevent error message from being stored
-            input=""
         fi
     done
 }
@@ -258,7 +256,6 @@ check_prerequisites() {
     # Required packages
     local required_packages=(
         "python3-kubernetes"
-        "jq"
     )
     
     # Run apt-get update once at the beginning
@@ -1350,16 +1347,26 @@ EOF
     fi
 fi
 
-# Configure DNS
 print_status "Configuring DNS..."
-if grep -q "^upstream_dns_servers:" ~/kubespray/inventory/akash/group_vars/all/all.yml; then
-    print_status "DNS already configured"
+
+DNS_FILE=~/kubespray/inventory/akash/group_vars/all/all.yml
+
+# 1. Uncomment the upstream_dns_servers line
+sed -i 's/^[[:space:]]*#\s*upstream_dns_servers:/upstream_dns_servers:/' "$DNS_FILE"
+
+# 2. Uncomment any lines containing 8.8.8.8 or 8.8.4.4
+sed -i 's/^[[:space:]]*#\s*-\s*8\.8\.8\.8/  - 8.8.8.8/' "$DNS_FILE"
+sed -i 's/^[[:space:]]*#\s*-\s*8\.8\.4\.4/  - 8.8.4.4/' "$DNS_FILE"
+
+# 3. Add 1.1.1.1 if it's not already present (commented or not)
+if ! grep -qE '^\s*- 1\.1\.1\.1' "$DNS_FILE"; then
+    # Add it right below upstream_dns_servers:
+    awk '/upstream_dns_servers:/ { print; print "  - 1.1.1.1"; next }1' "$DNS_FILE" > "${DNS_FILE}.tmp" && mv "${DNS_FILE}.tmp" "$DNS_FILE"
+    print_status "Added 1.1.1.1 to upstream DNS list"
 else
-    # Uncomment the upstream_dns_servers in all.yml
-    sed -i 's/^#upstream_dns_servers:/upstream_dns_servers:/' ~/kubespray/inventory/akash/group_vars/all/all.yml
-    sed -i 's/^#  - 8.8.8.8/  - 8.8.8.8/' ~/kubespray/inventory/akash/group_vars/all/all.yml
-    sed -i 's/^#  - 1.1.1.1/  - 1.1.1.1/' ~/kubespray/inventory/akash/group_vars/all/all.yml
+    print_status "1.1.1.1 already present in upstream DNS list"
 fi
+
 
 print_status "All configuration steps completed successfully!"
 
