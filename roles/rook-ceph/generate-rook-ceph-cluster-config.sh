@@ -70,7 +70,7 @@ echo -e "\nAnswers saved to rook-ceph-defaults.yml"
 # --- Begin template rendering ---
 
 ANSWERS_FILE="rook-ceph-defaults.yml"
-TEMPLATE_FILE="templates/rook-ceph-cluster.values.tpl"
+TEMPLATE_FILE="roles/rook-ceph/templates/rook-ceph-cluster.values.yml.j2"
 OUTPUT_FILE="rook-ceph-cluster.values.yml"
 
 if [ ! -f "$ANSWERS_FILE" ]; then
@@ -110,11 +110,6 @@ elif [ "$DEVICE_TYPE" == "nvme" ]; then
     STORAGE_CLASS="beta3"
 fi
 
-if [[ "$DEVICE_NAMES" == "nvme" && ! "$DEVICE_NAMES" =~ \*$ ]]; then
-    DEVICE_NAMES="${DEVICE_NAMES}*"
-fi
-DEVICE_FILTER=$(echo "$DEVICE_NAMES" | sed 's/\*/\*/g' | sed 's/^/^/')
-
 FAILURE_DOMAIN="host"
 POOL_SIZE=3
 MIN_SIZE=2
@@ -132,7 +127,6 @@ done
 cp "$TEMPLATE_FILE" "$OUTPUT_FILE.tmp"
 sed -i "s/{{ .POOL_SIZE }}/$POOL_SIZE/g" "$OUTPUT_FILE.tmp"
 sed -i "s/{{ .MIN_SIZE }}/$MIN_SIZE/g" "$OUTPUT_FILE.tmp"
-sed -i "s|{{ .DEVICE_FILTER }}|$DEVICE_FILTER|g" "$OUTPUT_FILE.tmp"
 sed -i "s/{{ .OSDS_PER_DEVICE }}/$OSDS_PER_DEVICE/g" "$OUTPUT_FILE.tmp"
 sed -i "s/{{ .FAILURE_DOMAIN }}/$FAILURE_DOMAIN/g" "$OUTPUT_FILE.tmp"
 sed -i "s/{{ .STORAGE_CLASS }}/$STORAGE_CLASS/g" "$OUTPUT_FILE.tmp"

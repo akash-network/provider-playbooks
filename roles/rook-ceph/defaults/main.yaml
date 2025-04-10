@@ -1,2 +1,19 @@
 rook_ceph_namespace: rook-ceph
 rook_ceph_version: "1.16.6"
+
+# Ceph cluster configuration
+pool_size: 3
+min_size: 2
+mon_count: 3
+mgr_count: 2
+
+# Storage configuration (these will be overridden by setup_provider.sh)
+device_filter: "sd*"
+osds_per_device: 1
+failure_domain: "host"
+storage_class: "rook-ceph-block"
+zfs_for_ephemeral: "false"
+kubelet_dir_path: "/data/kubelet"
+
+# Node configuration (will be set by setup_provider.sh)
+storage_nodes: []

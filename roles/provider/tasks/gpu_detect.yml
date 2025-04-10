@@ -1,0 +1,49 @@
+- name: Check for NVIDIA GPUs on each node
+  ansible.builtin.shell: nvidia-smi --query-gpu=driver_version,name,memory.total --format=csv,noheader
+  register: gpu_info_result
+  changed_when: false
+  failed_when: false
+
+- name: Get CUDA version from nodes with GPUs
+  ansible.builtin.shell: nvidia-smi | grep "CUDA Version" | awk '{print $9}'
+  register: cuda_version_result
+  changed_when: false
+  failed_when: false
+
+- name: Set GPU facts for nodes
+  ansible.builtin.set_fact:
+    node_gpu_info: "{{ gpu_info_result.stdout_lines }}"
+  when: gpu_info_result.rc == 0
+
+- name: Process GPU information
+  ansible.builtin.set_fact:
+    gpu_nodes: "{{ node_gpu_info | select('match', '.*') | list }}"
+  when: node_gpu_info is defined
+
+- name: Set driver version fact from first GPU node
+  ansible.builtin.set_fact:
+    driver_version: "{{ gpu_nodes[0].split(',')[0] | regex_replace('^([0-9]+\\.[0-9]+).*$', '\\1') }}"
+  when: gpu_nodes is defined and gpu_nodes | length > 0
+
+- name: Set CUDA version from nvidia-smi output
+  ansible.builtin.set_fact:
+    cuda_version: "{{ cuda_version_result.stdout | default('') }}"
+  when: cuda_version_result.rc == 0
+
+- name: Log GPU detection results
+  ansible.builtin.debug:
+    msg: |
+      GPU Detection Results for {{ inventory_hostname }}:
+      - Driver Version: {{ driver_version | default('Not detected') }}
+      - CUDA Version: {{ cuda_version | default('Not detected') }}
+      {% if gpu_nodes is defined and gpu_nodes | length > 0 %}
+      - GPU Models:
+      {% for gpu in gpu_nodes %}
+        - {{ gpu.split(',')[1] }} ({{ gpu.split(',')[2] }})
+      {% endfor %}
+      {% endif %}
+  when: gpu_info_result is defined
+
+- name: Set GPU presence fact
+  ansible.builtin.set_fact:
+    has_gpu: "{{ gpu_nodes is defined and gpu_nodes | length > 0 }}" 

@@ -3,6 +3,50 @@
   ansible.builtin.set_fact:
     ubuntu_version: "{{ ansible_distribution_version | replace('.', '') }}"
 
+- name: Debug repository file
+  ansible.builtin.shell: |
+    cat /etc/apt/sources.list.d/nvidia-container-toolkit.list 2>/dev/null || echo "File does not exist"
+  register: repo_contents
+  changed_when: false
+
+- name: Show repository contents
+  ansible.builtin.debug:
+    var: repo_contents.stdout
+
+- name: Remove existing NVIDIA repository files
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/apt/sources.list.d/nvidia-container-toolkit.list
+    - /etc/apt/trusted.gpg.d/nvidia-container-toolkit.gpg
+
+- name: Download NVIDIA GPG key
+  ansible.builtin.get_url:
+    url: https://nvidia.github.io/libnvidia-container/gpgkey
+    dest: /tmp/nvidia-gpgkey
+    mode: '0644'
+
+- name: Create NVIDIA keyring directory
+  ansible.builtin.file:
+    path: /usr/share/keyrings
+    state: directory
+    mode: '0755'
+
+- name: Import NVIDIA GPG key to keyring
+  ansible.builtin.shell: |
+    gpg --dearmor < /tmp/nvidia-gpgkey > /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+    chmod 644 /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+  args:
+    creates: /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+
+- name: Add NVIDIA repository
+  ansible.builtin.apt_repository:
+    repo: "deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://nvidia.github.io/libnvidia-container/stable/deb/amd64 /"
+    state: present
+    filename: nvidia-container-toolkit
+    update_cache: yes
+
 - name: Update the apt package index
   ansible.builtin.apt:
     update_cache: yes

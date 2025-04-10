@@ -6,6 +6,9 @@
 - name: Initialize the provider build steps
   ansible.builtin.import_tasks: prereqs.yml
 
+- name: Detect GPU and CUDA information
+  ansible.builtin.import_tasks: gpu_detect.yml
+
 - name: Initialize the Akash charts
   ansible.builtin.import_tasks: install.yml
 

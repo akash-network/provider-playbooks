@@ -1,19 +1,17 @@
 ---
 - name: Tailscale Playbook
-  hosts: "{{ host }}"
+  hosts: kube_node
   become: true
   become_user: root
-  serial: "{{ serial_hosts | default(1) }}"
   roles:
     - tailscale
   tags:
     - tailscale
 
 - name: OS Playbook
-  hosts: "{{ host }}"
+  hosts: kube_node
   become: true
   become_user: root
-  serial: "{{ serial_hosts | default(1) }}"
   roles:
     - os
   tags:
@@ -37,10 +35,9 @@
     - provider
 
 - name: GPU Playbook
-  hosts: "{{ host }}"
+  hosts: kube_node
   become: true
   become_user: root
-  serial: "{{ serial_hosts | default(1) }}"
   roles:
     - gpu
   tags:

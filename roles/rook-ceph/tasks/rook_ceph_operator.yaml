@@ -1,5 +1,9 @@
 ---
 # Tasks for deploying the Rook-Ceph operator
+- name: Set kubelet directory path
+  ansible.builtin.set_fact:
+    rook_ceph_kubelet_dir_path: "{{ kubelet_dir_path | default('/data/kubelet') }}"
+
 - name: Template Rook-Ceph operator Helm values file
   template:
     src: rook-ceph-operator.values.yml.j2

@@ -8,10 +8,66 @@ withdrawalperiod: "{{ withdrawal_period }}"
 email: "{{ email }}"
 website: "{{ website }}"
 attributes:
-{% for attr in attributes %}
-  - key: {{ attr.key }}
-    value: {{ attr.value }}
-{% endfor %}
+  - key: region
+    value: "{{ region }}"
+  - key: host
+    value: "{{ host }}"
+  - key: tier
+    value: "{{ tier }}"
+  - key: organization
+    value: "{{ organization }}"
+{% if cuda_version is defined and cuda_version %}
+  - key: cuda-version
+    value: "{{ cuda_version }}"
+{% endif %}
+{% if country is defined and country %}
+  - key: country
+    value: "{{ country }}"
+{% endif %}
+{% if city is defined and city %}
+  - key: city
+    value: "{{ city }}"
+{% endif %}
+{% if location_type is defined and location_type %}
+  - key: location-type
+    value: "{{ location_type }}"
+{% endif %}
+{% if cpu is defined and cpu %}
+  - key: cpu
+    value: "{{ cpu }}"
+{% endif %}
+{% if cpu_arch is defined and cpu_arch %}
+  - key: cpu-arch
+    value: "{{ cpu_arch }}"
+{% endif %}
+{% if storage_one_class is defined and storage_one_class %}
+  - key: storage-one-class
+    value: "{{ storage_one_class }}"
+{% endif %}
+{% if storage_one_persistent is defined and storage_one_persistent %}
+  - key: storage-one-persistent
+    value: "{{ storage_one_persistent }}"
+{% endif %}
+{% if storage_two_class is defined and storage_two_class %}
+  - key: storage-two-class
+    value: "{{ storage_two_class }}"
+{% endif %}
+{% if storage_two_persistent is defined and storage_two_persistent %}
+  - key: storage-two-persistent
+    value: "{{ storage_two_persistent }}"
+{% endif %}
+{% if memory is defined and memory %}
+  - key: memory
+    value: "{{ memory }}"
+{% endif %}
+{% if network_speed_up is defined and network_speed_up %}
+  - key: network-speed-up
+    value: "{{ network_speed_up }}"
+{% endif %}
+{% if network_speed_down is defined and network_speed_down %}
+  - key: network-speed-down
+    value: "{{ network_speed_down }}"
+{% endif %}
 {% if price_cpu is defined and price_cpu %}
 price_cpu: {{ price_cpu }}
 {% endif %}

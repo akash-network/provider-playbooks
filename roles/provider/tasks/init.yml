@@ -17,6 +17,26 @@
     msg: "This task can only be run on a Kubernetes control plane node"
   when: control_plane_check.rc != 0
 
+- name: Fetch latest provider version from GitHub
+  ansible.builtin.uri:
+    url: https://api.github.com/repos/akash-network/provider/releases/latest
+    method: GET
+    headers:
+      Accept: application/vnd.github.v3+json
+    return_content: yes
+  register: github_release
+  delegate_to: localhost
+
+- name: Set latest provider version
+  ansible.builtin.set_fact:
+    provider_version: "{{ github_release.json.tag_name | replace('v', '') }}"
+  when: github_release.status == 200
+
+- name: Log fetched provider version
+  ansible.builtin.debug:
+    msg: "Fetched latest provider version: {{ provider_version }}"
+  when: github_release.status == 200
+
 - name: Check if provider keys are passed as variables
   ansible.builtin.set_fact:
     provider_keys_passed: "{{ provider_b64_key is defined and provider_b64_keysecret is defined }}"

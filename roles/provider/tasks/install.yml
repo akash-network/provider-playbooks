@@ -57,6 +57,19 @@
   ansible.builtin.shell: cat /root/provider/price_script.sh | openssl base64 -A
   register: pricing_script_b64
 
+- name: Extract tier from attributes
+  ansible.builtin.set_fact:
+    tier: "{{ item.value }}"
+  when: item.key == 'tier'
+  loop: "{{ attributes | default([]) }}"
+  loop_control:
+    label: "{{ item.key }}"
+
+- name: Set default tier if not defined
+  ansible.builtin.set_fact:
+    tier: "community"
+  when: tier is not defined
+
 - name: copy the provider.yaml
   ansible.builtin.template:
     src: provider.yaml.j2
