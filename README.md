@@ -48,18 +48,23 @@ Before running the setup script, prepare the following information:
 
 ## Installation
 
-1. Clone this repository:
+1. SSH into your first node (node1) of the cluster:
+```bash
+ssh user@node1-ip-address
+```
+
+2. Clone this repository on node1:
 ```bash
 git clone https://github.com/akash-network/provider-playbooks.git
 cd provider-playbooks
 ```
 
-2. Run the setup script:
+3. Run the setup script:
 ```bash
 ./scripts/setup_provider.sh
 ```
 
-3. Follow the interactive prompts to configure your provider.
+4. Follow the interactive prompts to configure your provider.
 
 ## Playbook Selection
 
