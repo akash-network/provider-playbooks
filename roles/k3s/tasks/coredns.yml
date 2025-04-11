@@ -1,6 +1,6 @@
 ---
 - name: Copy kubeconfig to user's .kube directory
-  copy:
+  ansible.builtin.copy:
     src: /etc/rancher/k3s/k3s.yaml
     dest: "/home/{{ ansible_user }}/.kube/config"
     remote_src: yes
@@ -14,24 +14,26 @@
     kind: ConfigMap
     name: coredns
     namespace: kube-system
+    kubeconfig:  "/home/{{ ansible_user }}/.kube/config"
   register: coredns_cm
+
+- ansible.builtin.debug:
+    var: coredns_cm
   
 - name: Notify waiting for CoreDNS ConfigMap
-  debug:
+  ansible.builtin.debug:
     msg: "Waiting for the coredns configmap resource..."
   when: coredns_cm.resources is not defined or coredns_cm.resources | length == 0
 
 - name: Patch CoreDNS configuration
-  k8s:
-    state: present
-    definition:
-      apiVersion: v1
-      kind: ConfigMap
-      metadata:
-        name: coredns
-        namespace: kube-system
-      data:
-        Corefile: |
+  kubernetes.core.k8s_json_patch:
+    kind: ConfigMap
+    name: coredns
+    namespace: kube-system
+    patch:
+      - op: replace
+        path: /data/Corefile
+        value: |
           .:53 {
               errors
               health
@@ -54,7 +56,8 @@
               import /etc/coredns/custom/*.override
           }
           import /etc/coredns/custom/*.server
+    kubeconfig: "/home/{{ ansible_user }}/.kube/config"
   
 - name: Confirm CoreDNS configuration patched
-  debug:
+  ansible.builtin.debug:
     msg: "CoreDNS configuration patched."

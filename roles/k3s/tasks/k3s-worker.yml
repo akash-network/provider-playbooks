@@ -7,12 +7,12 @@
     owner: root
     group: root
   loop:
-    - /data/k3s
+    - "{{ k3s_data_dir }}"
     - /data/kubelet
 
 - name: Read K3s server token
   ansible.builtin.slurp:
-    src: /data/k3s/server/token
+    src: "{{ k3s_data_dir }}/server/token"
   register: k3s_token_b64
   delegate_to: "{{ groups['control_plane'][0] }}"  # Runs on first master node
   run_once: true                           # Only needs to run once  
@@ -36,21 +36,15 @@
       - "Debug: nodefs_dir = {{ kubelet_root_dir | default('') }}"
       - "Debug: imagefs_dir = {{ k3s_data_dir | default('') }}"
 
-# - name: Install K3s agent on worker node
-#   ansible.builtin.shell: |
-#     curl -sfL https://get.k3s.io | K3S_URL=https://{{ master_ip }}:6443 K3S_TOKEN={{ k3s_token }} INSTALL_K3S_EXEC=\"{{ kubelet_root_dir | default('') }} {{ k3s_data_dir | default('') }}\" sh -
-#   args:
-#     creates: /usr/local/bin/k3s
-#   register: k3s_install_result
-
 - name: Install K3s agent on worker node
-  ansible.builtin.shell: |
-    curl -sfL https://get.k3s.io | \
-    K3S_URL=https://{{ master_ip }}:6443 \
-    K3S_TOKEN={{ k3s_token }} \
-    K3S_DATA_DIR="/data/k3s" \
-    K3S_KUBELET_ARG="--root-dir=/data/kubelet" \
-    sh -
+  ansible.builtin.command: >
+    /bin/bash -c "curl -sfL https://get.k3s.io |
+    INSTALL_K3S_CHANNEL={{ k3s_version_channel }}
+    K3S_URL=https://{{ master_ip }}:6443
+    K3S_TOKEN={{ k3s_token }}
+    K3S_DATA_DIR="{{ k3s_data_dir }}"
+    K3S_KUBELET_ARG="--root-dir=/data/kubelet"
+    sh -"
   args:
     creates: /usr/local/bin/k3s
   register: k3s_install_result    
