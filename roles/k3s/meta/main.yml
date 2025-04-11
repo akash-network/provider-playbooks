@@ -1,0 +1,8 @@
+galaxy_info:
+  author: Vignesh V
+  description: Ansible role to setup Kubernetes control plane and worker nodes via K3s
+  company: Overclock
+  license: Apache-2.0
+  min_ansible_version: 2.15
+  platforms:
+    - name: Ubuntu
