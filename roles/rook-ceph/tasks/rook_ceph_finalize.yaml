@@ -33,12 +33,6 @@
     path: ~/provider/provider.yaml
     regexp: '^\s*- key: (feat-persistent-storage|capabilities/storage/1/class|capabilities/storage/1/persistent)\n\s*value: .*$'
     replace: ''
-  loop: 
-    - feat-persistent-storage
-    - capabilities/storage/1/class
-    - capabilities/storage/1/persistent
-  loop_control:
-    loop_var: capability_key
   vars:
     ansible_python_interpreter: /usr/bin/python3  # ensure consistent behavior if needed
 
