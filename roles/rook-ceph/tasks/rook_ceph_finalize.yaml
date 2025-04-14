@@ -1,5 +1,4 @@
 ---
-# this is not needed - i dont see the file rook-ceph-cluster.values.yml
 - name: Load rook-ceph values from file
   ansible.builtin.set_fact:
     rook_ceph_values: "{{ lookup('file', '/root/provider/rook-ceph-cluster.values.yml') | from_yaml }}"
@@ -28,3 +27,34 @@
   community.general.modprobe:
     name: rbd
     state: present
+
+- name: Remove old capability keys from provider.yaml
+  ansible.builtin.replace:
+    path: ~/provider/provider.yaml
+    regexp: '^\s*- key: (feat-persistent-storage|capabilities/storage/1/class|capabilities/storage/1/persistent)\n\s*value: .*$'
+    replace: ''
+  vars:
+    ansible_python_interpreter: /usr/bin/python3  # ensure consistent behavior if needed
+
+- name: Extract storage class name from rook-ceph-cluster.values.yml
+  ansible.builtin.set_fact:
+    storage_class_name: >-
+      {{ (lookup('file', '~/provider/rook-ceph-cluster.values.yml') | from_yaml)
+        .cephBlockPools
+        | selectattr('storageClass.enabled', 'defined')
+        | selectattr('storageClass.enabled')
+        | map(attribute='storageClass.name')
+        | list | first }}
+
+- name: Append updated capability entries to provider.yaml
+  ansible.builtin.blockinfile:
+    path: ~/provider/provider.yaml
+    block: |
+      - key: feat-persistent-storage
+        value: true
+      - key: capabilities/storage/1/class
+        value: {{ storage_class_name }}
+      - key: capabilities/storage/1/persistent
+        value: true
+    marker: "# {mark} akash-capabilities"
+    insertafter: EOF
