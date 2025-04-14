@@ -8,7 +8,7 @@
     group: root
   loop:
     - "{{ k3s_data_dir }}"
-    - /data/kubelet
+    - "{{ kubelet_root_dir }}"
 
 - name: Read K3s server token
   ansible.builtin.slurp:
@@ -43,7 +43,7 @@
     K3S_URL=https://{{ master_ip }}:6443
     K3S_TOKEN={{ k3s_token }}
     K3S_DATA_DIR="{{ k3s_data_dir }}"
-    K3S_KUBELET_ARG="--root-dir=/data/kubelet"
+    K3S_KUBELET_ARG="--root-dir={{ kubelet_root_dir }}"
     sh -"
   args:
     creates: /usr/local/bin/k3s
