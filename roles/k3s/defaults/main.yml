@@ -1,6 +1,6 @@
 ---
 # K3s and Calico defaults
-k3s_version_channel: stable
+k3s_version_channel: "v1.32.3+k3s1"
 disable_components: "traefik"
 k3s_flannel_backend: "none"
 kubelet_root_dir: "/data/kubelet"

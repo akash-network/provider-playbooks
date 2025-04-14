@@ -25,12 +25,6 @@
     state: directory
     mode: '0700'
 
-- name: Copy scheduler kubeconfig file
-  ansible.builtin.template:
-    src: "scheduler.kubeconfig"
-    dest: "{{ k3s_data_dir }}/server/cred/scheduler.kubeconfig"
-    mode: '0600'
-
 - name: Check if token file exists on first control plane node
   ansible.builtin.stat:
     path: "{{ k3s_data_dir }}/server/token"
