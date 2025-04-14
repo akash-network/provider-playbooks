@@ -1,0 +1,124 @@
+- name: Set facts for K3s installation
+  ansible.builtin.set_fact:
+    k3s_common_args: "--disable={{ disable_components }} --flannel-backend={{ k3s_flannel_backend }}"
+    nodefs_dir: "--kubelet-arg=root-dir={{ kubelet_root_dir }}"
+    imagefs_dir: "--data-dir={{ k3s_data_dir }}"
+    cluster_init: "--cluster-init"
+    tls_san_arg: "{% if tls_san is defined %}--tls-san={{ tls_san }}{% endif %}"
+    scheduler_config: "{% if scheduler_config_path is defined %}--kube-scheduler-arg=config={{ scheduler_config_path }}{% endif %}"
+
+- name: Ensure directory exists for scheduler config
+  ansible.builtin.file:
+    path: "{{ k3s_data_dir }}/server/etc"
+    state: directory
+    mode: '0755'
+
+- name: Copy scheduler configuration file
+  ansible.builtin.template:
+    src: "scheduler-config.yaml"
+    dest: "{{ k3s_data_dir }}/server/etc/scheduler-config.yaml"
+    mode: '0644'    
+
+- name: Ensure directory exists for scheduler credentials
+  ansible.builtin.file:
+    path: "{{ k3s_data_dir }}/server/cred"
+    state: directory
+    mode: '0700'
+
+- name: Check if token file exists on first control plane node
+  ansible.builtin.stat:
+    path: "{{ k3s_data_dir }}/server/token"
+  register: token_file
+  delegate_to: "{{ groups['control_plane'][0] }}"
+  run_once: true
+  failed_when: false
+
+- name: Set is_first_master fact
+  ansible.builtin.set_fact:
+    is_first_master: "{{ inventory_hostname == groups['control_plane'][0] or token_file.stat is not defined or not token_file.stat.exists }}"
+
+- name: Debug node role
+  ansible.builtin.debug:
+    msg: "{{ 'Installing FIRST control plane node' if is_first_master else 'Joining an additional control plane node to the cluster' }}"
+
+- name: Read K3s server token
+  ansible.builtin.slurp:
+    src: "{{ k3s_data_dir }}/server/token"
+  register: k3s_token_b64
+  delegate_to: "{{ groups['control_plane'][0] }}"
+  run_once: true
+  when: not is_first_master and token_file.stat is defined and token_file.stat.exists
+  failed_when: false
+
+- name: Set token as variable
+  ansible.builtin.set_fact:
+    k3s_token: "{{ k3s_token_b64['content'] | b64decode | trim }}"
+  when: not is_first_master and k3s_token_b64 is defined and k3s_token_b64.content is defined    
+
+- name: Show all IPv4 addresses
+  ansible.builtin.set_fact:
+    master_ip: "{{ groups['control_plane'][0] }}"
+  when: not is_first_master
+
+- name: Set install exec parameters for additional control plane
+  ansible.builtin.set_fact:
+    install_exec: "--node-ip={{ internal_ip }} {{ tls_san_arg }}"
+  when: not is_first_master
+
+- name: Add external IP if provided
+  ansible.builtin.set_fact:
+    install_exec: "{{ install_exec }} --node-external-ip={{ external_ip }}"
+  when: not is_first_master and external_ip is defined and external_ip != ""
+
+- name: Check token availability before installation
+  ansible.builtin.assert:
+    that: 
+      - "is_first_master or (k3s_token is defined) or (token is defined and token != '')"
+    fail_msg: "Token is required for joining additional control plane nodes but none was found"
+    success_msg: "Token is available for installation"
+  when: not is_first_master
+
+- name: Install K3s server (first node or additional control plane)
+  ansible.builtin.command: >
+    {% if is_first_master %}
+    /bin/bash -c "curl -sfL https://get.k3s.io |
+    INSTALL_K3S_CHANNEL={{ k3s_version_channel }}
+    INSTALL_K3S_EXEC='server {{ k3s_common_args }}
+    {{ cluster_init }}
+    --node-ip={{ internal_ip }}
+    {{ tls_san_arg }}
+    {{ nodefs_dir }}
+    {{ imagefs_dir }}
+    {{ scheduler_config }}' sh -"
+    {% else %}
+    /bin/bash -c "curl -sfL https://get.k3s.io |
+    INSTALL_K3S_CHANNEL={{ latestk3s | default(false) | ternary('latest', k3s_version_channel) }}
+    INSTALL_K3S_EXEC='server {{ k3s_common_args }}
+    --node-ip={{ internal_ip }}
+    {% if external_ip is defined and external_ip != '' %}--node-external-ip={{ external_ip }}{% endif %}
+    {{ nodefs_dir }}
+    {{ imagefs_dir }}
+    {{ scheduler_config }}'
+    K3S_URL="https://{{ groups['control_plane'][0] | default(master_ip) }}:6443"
+    K3S_TOKEN="{{ k3s_token | default(token) }}" sh -"
+    {% endif %}
+  args:
+    executable: /bin/bash
+    creates: /usr/local/bin/k3s
+  register: k3s_install
+  changed_when: k3s_install.rc == 0
+  notify: restart k3s
+
+- name: Wait for K3s to be ready
+  ansible.builtin.wait_for:
+    path: /etc/rancher/k3s/k3s.yaml
+    delay: 5
+    timeout: 300
+
+- name: Create .kube directory
+  ansible.builtin.file:
+    path: "/home/{{ ansible_user }}/.kube"
+    state: directory
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: '0755'

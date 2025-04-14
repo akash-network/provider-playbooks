@@ -1,4 +1,14 @@
 ---
+- name: k3s Playbook
+  hosts: "{{ host }}"
+  become: true
+  become_user: root
+  serial: "{{ serial_hosts | default(1) }}"
+  roles:
+    - k3s
+  tags:
+    - k3s
+
 - name: Tailscale Playbook
   hosts: kube_node
   become: true

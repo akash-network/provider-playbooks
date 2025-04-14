@@ -1,0 +1,63 @@
+---
+- name: Copy kubeconfig to user's .kube directory
+  ansible.builtin.copy:
+    src: /etc/rancher/k3s/k3s.yaml
+    dest: "/home/{{ ansible_user }}/.kube/config"
+    remote_src: yes
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: '0600'
+
+- name: Wait for CoreDNS ConfigMap to be available
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: ConfigMap
+    name: coredns
+    namespace: kube-system
+    kubeconfig:  "/home/{{ ansible_user }}/.kube/config"
+  register: coredns_cm
+
+- ansible.builtin.debug:
+    var: coredns_cm
+  
+- name: Notify waiting for CoreDNS ConfigMap
+  ansible.builtin.debug:
+    msg: "Waiting for the coredns configmap resource..."
+  when: coredns_cm.resources is not defined or coredns_cm.resources | length == 0
+
+- name: Patch CoreDNS configuration
+  kubernetes.core.k8s_json_patch:
+    kind: ConfigMap
+    name: coredns
+    namespace: kube-system
+    patch:
+      - op: replace
+        path: /data/Corefile
+        value: |
+          .:53 {
+              errors
+              health
+              ready
+              kubernetes cluster.local in-addr.arpa ip6.arpa {
+                pods insecure
+                fallthrough in-addr.arpa ip6.arpa
+              }
+              hosts /etc/coredns/NodeHosts {
+                ttl 60
+                reload 15s
+                fallthrough
+              }
+              prometheus :9153
+              forward . 8.8.8.8 1.1.1.1
+              cache 30
+              loop
+              reload
+              loadbalance
+              import /etc/coredns/custom/*.override
+          }
+          import /etc/coredns/custom/*.server
+    kubeconfig: "/home/{{ ansible_user }}/.kube/config"
+  
+- name: Confirm CoreDNS configuration patched
+  ansible.builtin.debug:
+    msg: "CoreDNS configuration patched."

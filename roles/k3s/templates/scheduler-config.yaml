@@ -1,0 +1,26 @@
+apiVersion: kubescheduler.config.k8s.io/v1
+kind: KubeSchedulerConfiguration
+clientConnection:
+  kubeconfig: "{{ k3s_data_dir }}/server/cred/scheduler.kubeconfig"
+leaderElection:
+  leaderElect: true
+profiles:
+- schedulerName: default-scheduler
+  plugins:
+    score:
+      enabled:
+      - name: NodeResourcesFit
+  pluginConfig:
+  - name: NodeResourcesFit
+    args:
+      scoringStrategy:
+        type: MostAllocated
+        resources:
+        - name: nvidia.com/gpu
+          weight: 10
+        - name: memory
+          weight: 1
+        - name: cpu
+          weight: 1
+        - name: ephemeral-storage
+          weight: 1
