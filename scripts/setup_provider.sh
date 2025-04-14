@@ -1046,20 +1046,28 @@ for i in "${!nodes[@]}"; do
 EOF
 done
 
-# Add etcd nodes (first 3 nodes)
+# Add etcd nodes
 cat >> ~/kubespray/inventory/akash/hosts.yaml << EOF
     etcd:
       hosts:
 EOF
 
-for i in "${!nodes[@]}"; do
-    node_num=$((i + 1))
-    if [ $node_num -le 3 ]; then
-        cat >> ~/kubespray/inventory/akash/hosts.yaml << EOF
+if [ ${#nodes[@]} -eq 2 ]; then
+    # Only assign etcd to the first node in a 2-node cluster
+    cat >> ~/kubespray/inventory/akash/hosts.yaml << EOF
+        node1:
+EOF
+else
+    # Assign up to the first 3 nodes for etcd in larger clusters
+    for i in "${!nodes[@]}"; do
+        node_num=$((i + 1))
+        if [ $node_num -le 3 ]; then
+            cat >> ~/kubespray/inventory/akash/hosts.yaml << EOF
         node${node_num}:
 EOF
-    fi
-done
+        fi
+    done
+fi
 
 # Add remaining cluster configuration
 cat >> ~/kubespray/inventory/akash/hosts.yaml << EOF
