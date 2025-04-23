@@ -704,29 +704,72 @@ else
     provider_website=""
 fi
 
-# Check if hosts.yaml already exists
-if [ -f ~/kubespray/inventory/akash/hosts.yaml ]; then
-    print_status "Found existing hosts.yaml file at ~/kubespray/inventory/akash/hosts.yaml"
-    while true; do
-        echo -n -e "${BLUE}[?]${NC} Do you want to use the existing hosts.yaml file? [y/n]: "
-        read -r response
-        case $response in
-            [Yy]* ) 
-                print_status "Using existing hosts.yaml file"
-                USE_EXISTING_HOSTS=true
-                break
-                ;;
-            [Nn]* ) 
-                print_status "Will create a new hosts.yaml file"
-                USE_EXISTING_HOSTS=false
-                break
-                ;;
-            * ) echo "Please answer y or n.";;
-        esac
+# Collect node information
+print_status "Node Information:"
+num_nodes=$(get_input "How many nodes do you have in your cluster?" "1" "^[0-9]+$")
+
+# Get node information for all nodes
+nodes=()
+for i in $(seq 1 $num_nodes); do
+    print_status "Node $i Information:"
+    node_info=$(get_node_info $i)
+    nodes+=("$node_info")
+done
+
+# Configure Rook-Ceph if selected
+if $SELECTED_ROOK_CEPH; then
+    print_status "Configuring Rook-Ceph storage..."
+    
+    # Use existing node names for storage selection
+    storage_nodes=()
+    echo -e "${YELLOW}Select which nodes will be used for Rook-Ceph storage:${NC}"
+    for i in $(seq 1 $num_nodes); do
+        node_ip=$(echo ${nodes[$i-1]} | cut -d'|' -f1)
+        while true; do
+            echo -n -e "${BLUE}[?]${NC} Use node$i ($node_ip) for persistent storage? [y/n]: "
+            read -r response
+            case $response in
+                [Yy]* ) storage_nodes+=("node$i"); break;;
+                [Nn]* ) break;;
+                * ) echo "Please answer y or n.";;
+            esac
+        done
     done
-else
-    USE_EXISTING_HOSTS=false
-fi
+    
+    # Confirm at least one storage node was selected
+    if [ ${#storage_nodes[@]} -eq 0 ]; then
+        print_error "At least one storage node must be selected for Rook-Ceph"
+        while true; do
+            echo -n -e "${BLUE}[?]${NC} Continue with Rook-Ceph setup? [y/n]: "
+            read -r response
+            case $response in
+                [Yy]* ) 
+                    # Ask for at least one node again
+                    for i in $(seq 1 $num_nodes); do
+                        node_ip=$(echo ${nodes[$i-1]} | cut -d'|' -f1)
+                        while true; do
+                            echo -n -e "${BLUE}[?]${NC} Use node$i ($node_ip) for persistent storage? [y/n]: "
+                            read -r response
+                            case $response in
+                                [Yy]* ) storage_nodes+=("node$i"); break;;
+                                [Nn]* ) break;;
+                                * ) echo "Please answer y or n.";;
+                            esac
+                        done
+                        # Break out once at least one node is selected
+                        if [ ${#storage_nodes[@]} -gt 0 ]; then
+                            break
+                        fi
+                    done
+                    break;;
+                [Nn]* ) 
+                    print_warning "Continuing without Rook-Ceph configuration"
+                    SELECTED_ROOK_CEPH=false
+                    break;;
+                * ) echo "Please answer y or n.";;
+            esac
+        done
+    fi
 
 # Only collect node information if we're not using existing hosts.yaml
 if [ "$USE_EXISTING_HOSTS" = false ]; then
