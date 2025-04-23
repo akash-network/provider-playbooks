@@ -14,7 +14,7 @@
   ansible.builtin.slurp:
     src: "{{ k3s_data_dir }}/server/token"
   register: k3s_token_b64
-  delegate_to: "{{ groups['control_plane'][0] }}"  # Runs on first master node
+  delegate_to: "{{ groups['kube_control_plane'][0] }}"  # Runs on first master node
   run_once: true                           # Only needs to run once  
 
 - name: Set token as variable
@@ -23,7 +23,7 @@
 
 - name: Show all IPv4 addresses
   ansible.builtin.set_fact:
-    master_ip: "{{ groups['control_plane'][0] }}"
+    master_ip: "{{ groups['kube_control_plane'][0] }}"
 
 - name: Verify required variables are set
   ansible.builtin.fail:

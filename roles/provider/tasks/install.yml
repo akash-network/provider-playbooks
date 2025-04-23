@@ -5,6 +5,7 @@
     kind: Namespace
     state: present
     api_version: v1
+    kubeconfig: "/etc/kubernetes/admin.conf"
     definition:
       metadata:
         labels: "{{ item.labels }}"
@@ -22,6 +23,7 @@
     name: "{{ item.name }}"
     chart_ref: "akash/{{ item.chart }}"
     release_namespace: akash-services
+    kubeconfig: "/etc/kubernetes/admin.conf"
   loop:
     - name: akash-hostname-operator
       chart: akash-hostname-operator
@@ -34,6 +36,7 @@
   kubernetes.core.k8s:
     state: present
     src: "https://raw.githubusercontent.com/akash-network/provider/v{{ provider_version }}/pkg/apis/akash.network/crd.yaml"
+    kubeconfig: "/etc/kubernetes/admin.conf"
   register: k8s_result
 
 - name: Display success message for CRD application
@@ -80,6 +83,7 @@
     name: akash-provider
     chart_ref: akash/provider
     release_namespace: akash-services
+    kubeconfig: "/etc/kubernetes/admin.conf"
     values:
       bidpricescript: "{{ pricing_script_b64.stdout }}"
     values_files:
@@ -118,6 +122,7 @@
     chart_version: 4.12.1
     release_namespace: ingress-nginx
     create_namespace: true
+    kubeconfig: "/etc/kubernetes/admin.conf"
     values_files:
       - /root/ingress-nginx-custom.yaml
 
@@ -126,6 +131,7 @@
     state: patched
     kind: "{{ item.kind }}"
     name: "{{ item.name }}"
+    kubeconfig: "/etc/kubernetes/admin.conf"
     definition:
       metadata:
         labels: "{{ item.labels }}"

@@ -12,6 +12,7 @@
 - name: Create Rook-Ceph namespace
   kubernetes.core.k8s:
     state: present
+    kubeconfig: "/etc/kubernetes/admin.conf"
     definition:
       apiVersion: v1
       kind: Namespace
@@ -24,6 +25,7 @@
     repo_url: https://charts.rook.io/release
     state: present
     force_update: true
+    kubeconfig: "/etc/kubernetes/admin.conf"
 
 - name: Install Rook Ceph Operator Helm chart
   kubernetes.core.helm:
@@ -32,6 +34,7 @@
     release_namespace: "{{ rook_ceph_namespace }}"
     create_namespace: true
     chart_version: "{{ rook_ceph_version }}"
+    kubeconfig: "/etc/kubernetes/admin.conf"
     values_files:
       - /tmp/rook-ceph-operator.values.yml
     wait: true
@@ -44,6 +47,7 @@
     kind: Deployment
     name: rook-ceph-operator
     namespace: "{{ rook_ceph_namespace }}"
+    kubeconfig: "/etc/kubernetes/admin.conf"
   register: operator
   until:
     - operator.resources is defined
