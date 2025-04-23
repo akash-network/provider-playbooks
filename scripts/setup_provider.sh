@@ -705,176 +705,151 @@ else
     provider_website=""
 fi
 
-# Check if hosts.yaml already exists
-if [ -f ~/kubespray/inventory/akash/hosts.yaml ]; then
-    print_status "Found existing hosts.yaml file at ~/kubespray/inventory/akash/hosts.yaml"
-    while true; do
-        echo -n -e "${BLUE}[?]${NC} Do you want to use the existing hosts.yaml file? [y/n]: "
-        read -r response
-        case $response in
-            [Yy]* ) 
-                print_status "Using existing hosts.yaml file"
-                USE_EXISTING_HOSTS=true
-                break
-                ;;
-            [Nn]* ) 
-                print_status "Will create a new hosts.yaml file"
-                USE_EXISTING_HOSTS=false
-                break
-                ;;
-            * ) echo "Please answer y or n.";;
-        esac
-    done
-else
-    USE_EXISTING_HOSTS=false
-fi
+# Collect node information
+print_status "Node Information:"
+num_nodes=$(get_input "How many nodes do you have in your cluster?" "1" "^[0-9]+$")
 
-# Only collect node information if we're not using existing hosts.yaml
-if [ "$USE_EXISTING_HOSTS" = false ]; then
-    print_status "Node Information:"
-    num_nodes=$(get_input "How many nodes do you have in your cluster?" "1" "^[0-9]+$")
+# Get node information for all nodes
+nodes=()
+for i in $(seq 1 $num_nodes); do
+    print_status "Node $i Information:"
+    node_info=$(get_node_info $i)
+    nodes+=("$node_info")
+done
 
-    # Get node information for all nodes
-    nodes=()
+# Configure Rook-Ceph if selected
+if $SELECTED_ROOK_CEPH; then
+    print_status "Configuring Rook-Ceph storage..."
+    
+    # Use existing node names for storage selection
+    storage_nodes=()
+    echo -e "${YELLOW}Select which nodes will be used for Rook-Ceph storage:${NC}"
     for i in $(seq 1 $num_nodes); do
-        print_status "Node $i Information:"
-        node_info=$(get_node_info $i)
-        nodes+=("$node_info")
+        node_ip=$(echo ${nodes[$i-1]} | cut -d'|' -f1)
+        while true; do
+            echo -n -e "${BLUE}[?]${NC} Use node$i ($node_ip) for persistent storage? [y/n]: "
+            read -r response
+            case $response in
+                [Yy]* ) storage_nodes+=("node$i"); break;;
+                [Nn]* ) break;;
+                * ) echo "Please answer y or n.";;
+            esac
+        done
     done
     
-    # Configure Rook-Ceph if selected
+    # Confirm at least one storage node was selected
+    if [ ${#storage_nodes[@]} -eq 0 ]; then
+        print_error "At least one storage node must be selected for Rook-Ceph"
+        while true; do
+            echo -n -e "${BLUE}[?]${NC} Continue with Rook-Ceph setup? [y/n]: "
+            read -r response
+            case $response in
+                [Yy]* ) 
+                    # Ask for at least one node again
+                    for i in $(seq 1 $num_nodes); do
+                        node_ip=$(echo ${nodes[$i-1]} | cut -d'|' -f1)
+                        while true; do
+                            echo -n -e "${BLUE}[?]${NC} Use node$i ($node_ip) for persistent storage? [y/n]: "
+                            read -r response
+                            case $response in
+                                [Yy]* ) storage_nodes+=("node$i"); break;;
+                                [Nn]* ) break;;
+                                * ) echo "Please answer y or n.";;
+                            esac
+                        done
+                        # Break out once at least one node is selected
+                        if [ ${#storage_nodes[@]} -gt 0 ]; then
+                            break
+                        fi
+                    done
+                    break;;
+                [Nn]* ) 
+                    print_warning "Continuing without Rook-Ceph configuration"
+                    SELECTED_ROOK_CEPH=false
+                    break;;
+                * ) echo "Please answer y or n.";;
+            esac
+        done
+    fi
+    
+    # Only continue if Rook-Ceph is still selected
     if $SELECTED_ROOK_CEPH; then
-        print_status "Configuring Rook-Ceph storage..."
+        # Get storage device information
+        device_names=$(get_input "What are the device names to use (e.g., sd*, nvme*)?" "sd*" "[a-zA-Z0-9*]+")
+        osds_per_device=$(get_input "How many OSDs per device?" "1" "^[0-9]+$")
         
-        # Use existing node names for storage selection
-        storage_nodes=()
-        echo -e "${YELLOW}Select which nodes will be used for Rook-Ceph storage:${NC}"
-        for i in $(seq 1 $num_nodes); do
-            node_ip=$(echo ${nodes[$i-1]} | cut -d'|' -f1)
-            while true; do
-                echo -n -e "${BLUE}[?]${NC} Use node$i ($node_ip) for persistent storage? [y/n]: "
-                read -r response
-                case $response in
-                    [Yy]* ) storage_nodes+=("node$i"); break;;
-                    [Nn]* ) break;;
-                    * ) echo "Please answer y or n.";;
-                esac
-            done
+        # Storage device type selection
+        while true; do
+            echo -n -e "${BLUE}[?]${NC} What type of storage device (hdd/ssd/nvme)? [hdd]: "
+            read -r response
+            case $response in
+                hdd|ssd|nvme) storage_device_type=$response; break;;
+                "") storage_device_type="hdd"; break;;
+                * ) echo "Please answer hdd, ssd, or nvme.";;
+            esac
         done
         
-        # Confirm at least one storage node was selected
-        if [ ${#storage_nodes[@]} -eq 0 ]; then
-            print_error "At least one storage node must be selected for Rook-Ceph"
-            while true; do
-                echo -n -e "${BLUE}[?]${NC} Continue with Rook-Ceph setup? [y/n]: "
-                read -r response
-                case $response in
-                    [Yy]* ) 
-                        # Ask for at least one node again
-                        for i in $(seq 1 $num_nodes); do
-                            node_ip=$(echo ${nodes[$i-1]} | cut -d'|' -f1)
-                            while true; do
-                                echo -n -e "${BLUE}[?]${NC} Use node$i ($node_ip) for persistent storage? [y/n]: "
-                                read -r response
-                                case $response in
-                                    [Yy]* ) storage_nodes+=("node$i"); break;;
-                                    [Nn]* ) break;;
-                                    * ) echo "Please answer y or n.";;
-                                esac
-                            done
-                            # Break out once at least one node is selected
-                            if [ ${#storage_nodes[@]} -gt 0 ]; then
-                                break
-                            fi
-                        done
-                        break;;
-                    [Nn]* ) 
-                        print_warning "Continuing without Rook-Ceph configuration"
-                        SELECTED_ROOK_CEPH=false
-                        break;;
-                    * ) echo "Please answer y or n.";;
-                esac
-            done
-        fi
+        # ZFS Configuration
+        while true; do
+            echo -n -e "${BLUE}[?]${NC} Do your worker nodes use ZFS for ephemeral storage? [y/n]: "
+            read -r response
+            case $response in
+                [Yy]* ) zfs_for_ephemeral="true"; break;;
+                [Nn]* ) zfs_for_ephemeral="false"; break;;
+                * ) echo "Please answer y or n.";;
+            esac
+        done
         
-        # Only continue if Rook-Ceph is still selected
-        if $SELECTED_ROOK_CEPH; then
-            # Get storage device information
-            device_names=$(get_input "What are the device names to use (e.g., sd*, nvme*)?" "sd*" "[a-zA-Z0-9*]+")
-            osds_per_device=$(get_input "How many OSDs per device?" "1" "^[0-9]+$")
-            
-            # Storage device type selection
-            while true; do
-                echo -n -e "${BLUE}[?]${NC} What type of storage device (hdd/ssd/nvme)? [hdd]: "
-                read -r response
-                case $response in
-                    hdd|ssd|nvme) storage_device_type=$response; break;;
-                    "") storage_device_type="hdd"; break;;
-                    * ) echo "Please answer hdd, ssd, or nvme.";;
-                esac
-            done
-            
-            # ZFS Configuration
-            while true; do
-                echo -n -e "${BLUE}[?]${NC} Do your worker nodes use ZFS for ephemeral storage? [y/n]: "
-                read -r response
-                case $response in
-                    [Yy]* ) zfs_for_ephemeral="true"; break;;
-                    [Nn]* ) zfs_for_ephemeral="false"; break;;
-                    * ) echo "Please answer y or n.";;
-                esac
-            done
-            
-            # Use the consistent kubelet path that matches our ephemeral storage configuration
-            kubelet_dir_path="/data/kubelet"
-            
-            # Create Rook-Ceph defaults file
-            mkdir -p ~/provider-playbooks/roles/rook-ceph/defaults
+        # Use the consistent kubelet path that matches our ephemeral storage configuration
+        kubelet_dir_path="/data/kubelet"
+        
+        # Create Rook-Ceph defaults file
+        mkdir -p ~/provider-playbooks/roles/rook-ceph/defaults
 
-            # Determine MON and MGR counts based on number of storage nodes
-            if [ ${#storage_nodes[@]} -eq 1 ]; then
-                mon_count=1
-                mgr_count=1
-                pool_size=$((osds_per_device + 1))
-                min_size=2
-                failure_domain="osd"
-            elif [ ${#storage_nodes[@]} -eq 2 ]; then
-                mon_count=2
-                mgr_count=2
-                pool_size=3
-                min_size=2
-                failure_domain="host"
-            else
-                mon_count=3
-                mgr_count=2
-                pool_size=3
-                min_size=2
-                failure_domain="host"
-            fi
+        # Determine MON and MGR counts based on number of storage nodes
+        if [ ${#storage_nodes[@]} -eq 1 ]; then
+            mon_count=1
+            mgr_count=1
+            pool_size=$((osds_per_device + 1))
+            min_size=2
+            failure_domain="osd"
+        elif [ ${#storage_nodes[@]} -eq 2 ]; then
+            mon_count=2
+            mgr_count=2
+            pool_size=3
+            min_size=2
+            failure_domain="host"
+        else
+            mon_count=3
+            mgr_count=2
+            pool_size=3
+            min_size=2
+            failure_domain="host"
+        fi
 
-            # Determine storage class based on device type
-            if [ "$storage_device_type" == "ssd" ]; then
-                storage_class="beta2"
-            elif [ "$storage_device_type" == "nvme" ]; then
-                storage_class="beta3"
-            else
-                storage_class="beta1"
-            fi
+        # Determine storage class based on device type
+        if [ "$storage_device_type" == "ssd" ]; then
+            storage_class="beta2"
+        elif [ "$storage_device_type" == "nvme" ]; then
+            storage_class="beta3"
+        else
+            storage_class="beta1"
+        fi
 
-            # Create the nodes list with proper formatting
-            nodes_list=""
-            for node in "${storage_nodes[@]}"; do
-                if [ -z "$nodes_list" ]; then
-                    nodes_list="  - name: \"$node\"
+        # Create the nodes list with proper formatting
+        nodes_list=""
+        for node in "${storage_nodes[@]}"; do
+            if [ -z "$nodes_list" ]; then
+                nodes_list="  - name: \"$node\"
     config:"
-                else
-                    nodes_list="$nodes_list
+            else
+                nodes_list="$nodes_list
   - name: \"$node\"
     config:"
-                fi
-            done
+            fi
+        done
 
-            cat > ~/provider-playbooks/roles/rook-ceph/defaults/main.yaml << EOF
+        cat > ~/provider-playbooks/roles/rook-ceph/defaults/main.yaml << EOF
 rook_ceph_namespace: rook-ceph
 rook_ceph_version: "1.16.6"
 
@@ -902,13 +877,13 @@ kubelet_dir_path: "$kubelet_dir_path"
 # Node configuration
 storage_nodes: [${storage_nodes[*]}]
 EOF
-            
-            # Create host_vars for storage nodes
-            for node in "${storage_nodes[@]}"; do
-                mkdir -p /root/provider-playbooks/host_vars
-                if [ -f "/root/provider-playbooks/host_vars/${node}.yml" ]; then
-                    # If file exists, append to it
-                    cat >> "/root/provider-playbooks/host_vars/${node}.yml" << EOF
+        
+        # Create host_vars for storage nodes
+        for node in "${storage_nodes[@]}"; do
+            mkdir -p /root/provider-playbooks/host_vars
+            if [ -f "/root/provider-playbooks/host_vars/${node}.yml" ]; then
+                # If file exists, append to it
+                cat >> "/root/provider-playbooks/host_vars/${node}.yml" << EOF
 
 # Rook-Ceph Storage Configuration
 rook_ceph_kubelet_dir_path: "$kubelet_dir_path"
@@ -918,9 +893,9 @@ rook_ceph_storage:
   device_type: "$storage_device_type"
   zfs_for_ephemeral: "$zfs_for_ephemeral"
 EOF
-                else
-                    # Create new file
-                    cat > "/root/provider-playbooks/host_vars/${node}.yml" << EOF
+            else
+                # Create new file
+                cat > "/root/provider-playbooks/host_vars/${node}.yml" << EOF
 # Node Configuration - Rook-Ceph Storage
 
 rook_ceph_kubelet_dir_path: "$kubelet_dir_path"
@@ -930,12 +905,11 @@ rook_ceph_storage:
   device_type: "$storage_device_type"
   zfs_for_ephemeral: "$zfs_for_ephemeral"
 EOF
-                fi
-            done
-            
-            print_status "Rook-Ceph configuration saved"
-            print_warning "Please ensure your storage nodes have the specified devices available"
-        fi
+            fi
+        done
+        
+        print_status "Rook-Ceph configuration saved"
+        print_warning "Please ensure your storage nodes have the specified devices available"
     fi
 fi
 
