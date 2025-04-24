@@ -12,7 +12,7 @@
     kind: StorageClass
     name: "{{ rook_ceph_storage_class }}"
     state: present
-    kubeconfig: "/etc/kubernetes/admin.conf"
+    kubeconfig: "{{ kubeconfig_path }}"
     definition:
       metadata:
         labels:

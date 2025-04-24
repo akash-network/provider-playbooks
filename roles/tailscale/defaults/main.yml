@@ -33,3 +33,5 @@ tailscale_statefile_name: ".ocl-tailscale"
 tailscale_apt_keyring_path: /usr/share/keyrings/tailscale-archive-keyring.gpg
 tailscale_apt_repo: deb [signed-by={{ tailscale_apt_keyring_path }}] https://pkgs.tailscale.com/{{ tailscale_release | lower }}/{{ tailscale_distro | lower }} {{ ansible_distribution_release | lower }} main
 tailscale_apt_signkey: https://pkgs.tailscale.com/{{ tailscale_release | lower }}/{{ ansible_distribution | lower }}/{{ ansible_distribution_release | lower }}.noarmor.gpg
+
+kubeconfig_path: "/etc/kubernetes/admin.conf"

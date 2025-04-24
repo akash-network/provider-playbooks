@@ -20,7 +20,7 @@
   kubernetes.core.k8s:
     state: present
     src: "{{ install_dir }}/nvidia-runtime-class.yml"
-    kubeconfig: "/etc/kubernetes/admin.conf"
+    kubeconfig: "{{ kubeconfig_path }}"
   delegate_to: node1
   run_once: true
   when: inventory_hostname != 'node1'
@@ -30,7 +30,7 @@
     state: patched
     kind: Node
     name: "{{ inventory_hostname }}"
-    kubeconfig: "/etc/kubernetes/admin.conf"
+    kubeconfig: "{{ kubeconfig_path }}"
     definition:
       metadata:
         labels:
@@ -43,19 +43,19 @@
   kubernetes.core.helm_repository:
     name: nvdp
     repo_url: https://nvidia.github.io/k8s-device-plugin
-    kubeconfig: "/etc/kubernetes/admin.conf"
+    kubeconfig: "{{ kubeconfig_path }}"
   delegate_to: node1
   run_once: true
 
 - name: Update Helm repositories
-  command: helm --kubeconfig=/etc/kubernetes/admin.conf repo update
+  command: helm --kubeconfig={{ kubeconfig_path }} repo update
   changed_when: true
   delegate_to: node1
   run_once: true
 
 - name: Check for required GPU node labels
   ansible.builtin.shell: >
-    kubectl --kubeconfig=/etc/kubernetes/admin.conf get node {{ inventory_hostname }} -o json | jq -r '
+    kubectl --kubeconfig={{ kubeconfig_path }} get node {{ inventory_hostname }} -o json | jq -r '
     {
       "name": .metadata.name,
       "has_allow_nvdp": (.metadata.labels."allow-nvdp" == "true"),
@@ -103,7 +103,7 @@
     release_namespace: nvidia-device-plugin
     create_namespace: true
     chart_version: 0.17.1
-    kubeconfig: "/etc/kubernetes/admin.conf"
+    kubeconfig: "{{ kubeconfig_path }}"
     values:
       runtimeClassName: nvidia
       deviceListStrategy: volume-mounts

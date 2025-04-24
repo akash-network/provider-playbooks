@@ -1,20 +1,4 @@
 ---
-- name: Setup K3s groups
-  hosts: all
-  gather_facts: false
-  tasks:
-    - name: Create control_plane group
-      ansible.builtin.add_host:
-        name: "{{ item }}"
-        groups: control_plane
-      loop: "{{ groups['all'] | slice(0, 1) }}"
-
-    - name: Create workers group
-      ansible.builtin.add_host:
-        name: "{{ item }}"
-        groups: workers
-      loop: "{{ groups['all'] | slice(1) }}"
-
 - name: k3s Playbook
   hosts: all
   become: true

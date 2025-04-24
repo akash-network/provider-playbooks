@@ -9,7 +9,7 @@
     chart_ref: rook-release/rook-ceph-cluster
     release_namespace: "{{ rook_ceph_namespace }}"
     chart_version: "{{ rook_ceph_version }}"
-    kubeconfig: "/etc/kubernetes/admin.conf"
+    kubeconfig: "{{ kubeconfig_path }}"
     values_files:
       - /root/provider/rook-ceph-cluster.values.yml
     state: present

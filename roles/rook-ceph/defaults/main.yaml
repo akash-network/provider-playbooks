@@ -17,3 +17,4 @@ kubelet_dir_path: "/data/kubelet"
 
 # Node configuration (will be set by setup_provider.sh)
 storage_nodes: []
+kubeconfig_path: "/etc/kubernetes/admin.conf" 

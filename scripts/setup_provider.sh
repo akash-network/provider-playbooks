@@ -1420,12 +1420,12 @@ print_status "Running playbooks based on your selections..."
 
 # Run Kubernetes installation if selected
 if $SELECTED_KUBERNETES; then
-    if $SELECTED_KUBESPRAY; then
-        print_status "Running Kubespray to set up Kubernetes cluster..."
-        cd ~/kubespray
-        source venv/bin/activate
-        ansible-playbook -i inventory/akash/hosts.yaml cluster.yml -t kubespray -v
-    else
+if $SELECTED_KUBESPRAY; then
+    print_status "Running Kubespray to set up Kubernetes cluster..."
+    cd ~/kubespray
+    source venv/bin/activate
+    ansible-playbook -i inventory/akash/hosts.yaml cluster.yml -t kubespray -v
+else
         print_status "Running K3s installation..."
         cd ~/provider-playbooks
         source ~/kubespray/venv/bin/activate
