@@ -57,7 +57,7 @@
 
 - name: Show all IPv4 addresses
   ansible.builtin.set_fact:
-    master_ip: "{{ groups['kube_control_plane'][0] }}"
+    master_ip: "{{ hostvars[groups['kube_control_plane'][0]]['internal_ip'] }}"
   when: not is_first_master
 
 - name: Set install exec parameters for additional control plane
@@ -101,7 +101,7 @@
     {{ nodefs_dir }}
     {{ imagefs_dir }}
     {{ scheduler_config }}'
-    K3S_URL="https://{{ groups['kube_control_plane'][0] | default(master_ip) }}:6443"
+    K3S_URL="https://{{ master_ip }}:6443"
     K3S_TOKEN="{{ k3s_token | default(token) }}" sh -"
     {% endif %}
   args:
@@ -124,12 +124,14 @@
     owner: "{{ ansible_user }}"
     group: "{{ ansible_user }}"
     mode: '0755'
+  when: is_first_master
 
 - name: Create kubernetes directory
   ansible.builtin.file:
     path: "/etc/kubernetes"
     state: directory
     mode: '0755'
+  when: is_first_master
 
 - name: Copy K3s kubeconfig to standard location
   ansible.builtin.copy:
@@ -137,13 +139,14 @@
     dest: "/etc/kubernetes/admin.conf"
     mode: '0644'
   register: kubeconfig_copy
+  when: is_first_master
 
 - name: Update kubeconfig server address
   ansible.builtin.replace:
     path: "/etc/kubernetes/admin.conf"
     regexp: 'server: https://127.0.0.1:6443'
     replace: 'server: https://{{ internal_ip }}:6443'
-  when: kubeconfig_copy.changed
+  when: kubeconfig_copy.changed and is_first_master
 
 - name: Create symlink to admin.conf
   ansible.builtin.file:
@@ -151,6 +154,7 @@
     dest: "/home/{{ ansible_user }}/.kube/config"
     state: link
     force: yes
+  when: is_first_master
 
 - name: Set KUBECONFIG environment variable
   ansible.builtin.lineinfile:
@@ -159,3 +163,4 @@
     state: present
     create: yes
     mode: '0644'
+  when: is_first_master
