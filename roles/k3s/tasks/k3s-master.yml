@@ -85,7 +85,7 @@
     INSTALL_K3S_CHANNEL={{ k3s_version_channel }}
     INSTALL_K3S_EXEC='server {{ k3s_common_args }}
     {{ cluster_init }}
-    --node-ip={{ internal_ip }}
+    --node-ip={{ hostvars[inventory_hostname].internal_ip }}
     --node-name={{ inventory_hostname }}
     {{ tls_san_arg }}
     {{ nodefs_dir }}

@@ -1004,9 +1004,13 @@ copy_inventory() {
     cd ~/kubespray
     # Create the directory if it doesn't exist
     mkdir -p inventory/akash
-    # Copy sample inventory to the correct location
-    cp -rfp inventory/sample/* inventory/akash/
-    print_status "Inventory copied successfully"
+    # Only copy if the hosts.yaml doesn't exist
+    if [ ! -f inventory/akash/hosts.yaml ]; then
+        cp -rfp inventory/sample/* inventory/akash/
+        print_status "Sample inventory copied successfully"
+    else
+        print_status "Using existing inventory file"
+    fi
 }
 
 # Create inventory using Kubespray's inventory builder
@@ -1041,6 +1045,7 @@ for i in "${!nodes[@]}"; do
       ansible_host: ${node_ip}
       ip: ${node_ip}
       access_ip: ${node_ip}
+      internal_ip: ${node_ip}
 EOF
 done
 
@@ -1426,11 +1431,24 @@ if $SELECTED_KUBESPRAY; then
     source venv/bin/activate
     ansible-playbook -i inventory/akash/hosts.yaml cluster.yml -t kubespray -v
 else
-        print_status "Running K3s installation..."
-        cd ~/provider-playbooks
-        source ~/kubespray/venv/bin/activate
-        ansible-playbook -i ~/kubespray/inventory/akash/hosts.yaml playbooks.yml -t k3s -v
-    fi
+    print_status "Running K3s installation..."
+    
+    # Simple and direct approach - force add internal_ip to host_vars files
+    print_status "Adding internal_ip to host_vars files..."
+    NODE_IP=$(grep -A 1 'node1:' ~/kubespray/inventory/akash/hosts.yaml | grep 'ansible_host' | awk '{print $2}')
+    
+    # Ensure host_vars directory exists
+    mkdir -p ~/provider-playbooks/host_vars
+    
+    # Simply force append the variable to each file
+    for i in $(seq 1 $(grep -c "node[0-9]\+:" ~/kubespray/inventory/akash/hosts.yaml | grep -A1 "hosts:" | grep -v "hosts:" | wc -l)); do
+        NODE_NAME="node$i"
+        echo -e "\n# K3s specific variables\ninternal_ip: \"$NODE_IP\"" >> ~/provider-playbooks/host_vars/${NODE_NAME}.yml
+        print_status "Added internal_ip to host_vars file for $NODE_NAME"
+    done
+    
+    ansible-playbook -i ~/kubespray/inventory/akash/hosts.yaml playbooks.yml -t k3s -v
+fi
 else
     print_status "Skipping Kubernetes installation as it was not selected"
     print_status "Note: Make sure you have a working Kubernetes cluster before proceeding"
@@ -1443,6 +1461,39 @@ if $SELECTED_OS || $SELECTED_GPU || $SELECTED_PROVIDER || $SELECTED_TAILSCALE ||
     
     # Activate the virtual environment
     source ~/kubespray/venv/bin/activate
+    
+    # Check if K3s is running on node1
+    NODE_IP=$(grep -A 1 'node1:' ~/kubespray/inventory/akash/hosts.yaml | grep 'ansible_host' | awk '{print $2}')
+    if ssh -o StrictHostKeyChecking=no root@${NODE_IP} "systemctl is-active k3s" 2>/dev/null | grep -q "active"; then
+        print_status "K3s is running on node1, setting up kubeconfig..."
+        
+        # Create .kube directory for ansible user
+        mkdir -p /root/.kube
+        
+        # Ensure k3s.yaml exists
+        if [ ! -f "/etc/rancher/k3s/k3s.yaml" ]; then
+            print_error "k3s.yaml not found at /etc/rancher/k3s/k3s.yaml"
+            exit 1
+        fi
+        
+        # Copy and configure k3s.yaml
+        cp /etc/rancher/k3s/k3s.yaml /root/.kube/config
+        chmod 600 /root/.kube/config
+        
+        # Update the server address in the config
+        sed -i "s|server: https://127.0.0.1:6443|server: https://${NODE_IP}:6443|" /root/.kube/config
+        
+        # Set KUBECONFIG
+        export KUBECONFIG=/root/.kube/config
+        
+        # Verify kubeconfig
+        if ! kubectl get nodes; then
+            print_error "Failed to verify kubeconfig. Please check the configuration."
+            exit 1
+        fi
+    else
+        print_status "K3s is not running on node1, skipping kubeconfig setup"
+    fi
     
     # Run OS playbook if selected
     if $SELECTED_OS; then
