@@ -1467,21 +1467,11 @@ if $SELECTED_OS || $SELECTED_GPU || $SELECTED_PROVIDER || $SELECTED_TAILSCALE ||
     if ssh -o StrictHostKeyChecking=no root@${NODE_IP} "systemctl is-active k3s" 2>/dev/null | grep -q "active"; then
         print_status "K3s is running on node1, setting up kubeconfig..."
         
-        # Create .kube directory for ansible user
+        # Create .kube directory if it doesn't exist
         mkdir -p /root/.kube
         
-        # Ensure k3s.yaml exists
-        if [ ! -f "/etc/rancher/k3s/k3s.yaml" ]; then
-            print_error "k3s.yaml not found at /etc/rancher/k3s/k3s.yaml"
-            exit 1
-        fi
-        
-        # Copy and configure k3s.yaml
-        cp /etc/rancher/k3s/k3s.yaml /root/.kube/config
-        chmod 600 /root/.kube/config
-        
-        # Update the server address in the config
-        sed -i "s|server: https://127.0.0.1:6443|server: https://${NODE_IP}:6443|" /root/.kube/config
+        # Create symlink to k3s.yaml
+        ln -sf /etc/rancher/k3s/k3s.yaml /root/.kube/config
         
         # Set KUBECONFIG
         export KUBECONFIG=/root/.kube/config
