@@ -13,7 +13,6 @@
 - name: Check Kubernetes cluster accessibility
   kubernetes.core.k8s_info:
     kind: Node
-    kubeconfig: "{{ kubeconfig_path }}"
   register: k8s_nodes
   failed_when: k8s_nodes.resources | length == 0
 

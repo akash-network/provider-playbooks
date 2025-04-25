@@ -3,4 +3,3 @@
 install_dir: "/root/ansible.tmp/"
 nvidia_version: 565.57.01
 cruntime_toml_path: '/etc/nvidia-container-runtime/config.toml'
-kubeconfig_path: "/etc/kubernetes/admin.conf"
