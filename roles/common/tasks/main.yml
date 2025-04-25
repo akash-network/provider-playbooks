@@ -1,0 +1,13 @@
+---
+- name: Check if Tailscale update is available
+  shell: apt list --upgradable -q 2>/dev/null | grep -q "tailscale"
+  register: tailscale_update
+  changed_when: false
+  failed_when: false
+
+- name: Update apt cache and upgrade Tailscale
+  apt:
+    name: tailscale
+    state: latest
+    update_cache: yes
+  when: tailscale_update.rc == 0

@@ -14,12 +14,6 @@
     - not tailscale_authkey
     - not tailscale_up_skip
 
-- name: Update apt cache and install Tailscale
-  ansible.builtin.apt:
-    name: tailscale
-    update_cache: yes
-    state: present
-
 - name: Apt Dependencies
   ansible.builtin.apt:
     name: "{{ tailscale_apt_dependencies }}"
