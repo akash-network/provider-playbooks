@@ -92,8 +92,10 @@
     state: reloaded
   when: ssh_config_updated.changed and ssh_service_name.stdout != ""
 
-- name: Install chrony
+- name: Install required packages
   ansible.builtin.apt:
-    name: chrony
+    name:
+      - tailscale
+      - chrony
     state: present
-    update_cache: yes  
+    update_cache: yes
