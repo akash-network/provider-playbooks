@@ -1,3 +1,6 @@
+dependencies:
+  - role: common
+
 galaxy_info:
   author: Vignesh V
   description: Ansible role to configure sysctl and Cron jobs in Ubuntu.

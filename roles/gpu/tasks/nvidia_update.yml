@@ -96,7 +96,6 @@
     update_cache: yes
 
 - name: Install NVIDIA driver
-
   ansible.builtin.apt:
     name: "nvidia-driver-{{ nvidia_major_version }}"
     state: present

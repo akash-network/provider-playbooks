@@ -96,4 +96,4 @@
   ansible.builtin.apt:
     name: chrony
     state: present
-    update_cache: yes  
+    update_cache: yes
