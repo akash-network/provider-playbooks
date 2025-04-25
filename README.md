@@ -70,7 +70,9 @@ cd provider-playbooks
 
 The setup script will guide you through selecting which playbooks to run:
 
-- **Kubespray**: Kubernetes installation (required for new clusters)
+- **Kubernetes Installation** (required for new clusters)
+  - **Kubespray**: Production-grade, full-featured Kubernetes installation
+  - **K3s**: Lightweight, single binary Kubernetes distribution (ideal for edge/IoT)
 - **OS**: Basic OS configuration and optimizations
 - **GPU**: NVIDIA driver and container toolkit installation
 - **Provider**: Akash Provider service installation
@@ -87,6 +89,9 @@ ansible-playbook -i inventory/hosts.yaml playbooks.yml
 
 # Run specific playbooks using tags
 ansible-playbook -i inventory/hosts.yaml playbooks.yml -t os,provider,gpu
+
+# Run K3s specific playbooks
+ansible-playbook -i inventory/hosts.yaml playbooks.yml -t k3s
 ```
 
 ## Troubleshooting
@@ -101,7 +106,8 @@ Common issues and solutions:
 2. **Kubernetes Installation**
    - Check system requirements
    - Verify network configuration
-   - Review kubespray logs
+   - Review kubespray logs (for Kubespray)
+   - Check K3s service status (for K3s)
 
 3. **Provider Service**
    - Check wallet configuration
