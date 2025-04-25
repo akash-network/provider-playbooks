@@ -12,7 +12,6 @@
     kind: StorageClass
     name: "{{ rook_ceph_storage_class }}"
     state: present
-    kubeconfig: "{{ kubeconfig_path }}"
     definition:
       metadata:
         labels:

@@ -1,6 +1,6 @@
 ---
 - name: Check if node has control-plane label
-  ansible.builtin.shell: kubectl --kubeconfig={{ kubeconfig_path }} get node {{ inventory_hostname }} --no-headers -o custom-columns=LABELS:.metadata.labels | grep -q 'node-role.kubernetes.io/control-plane\|node-role.kubernetes.io/master'
+  ansible.builtin.shell: kubectl get node {{ inventory_hostname }} --no-headers -o custom-columns=LABELS:.metadata.labels | grep -q 'node-role.kubernetes.io/control-plane\|node-role.kubernetes.io/master'
   register: control_plane_check
   failed_when: false
   changed_when: false
@@ -18,7 +18,7 @@
   failed_when: k8s_nodes.resources | length == 0
 
 - name: Get Kubernetes version
-  ansible.builtin.command: kubectl --kubeconfig={{ kubeconfig_path }} version -o json
+  ansible.builtin.command: kubectl version -o json
   register: k8s_version
   changed_when: false
 
