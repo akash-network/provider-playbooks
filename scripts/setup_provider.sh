@@ -1574,4 +1574,4 @@ while true; do
 done
 
 print_status "Setup process completed!"
-print_status "Thank you for using the Akash Provider Setup Script!" 
+print_status "Thank you for using the Akash Provider Setup Script!"
