@@ -1,9 +1,13 @@
 ---
 - name: k3s Playbook
-  hosts: "{{ host }}"
+  hosts: all
   become: true
   become_user: root
   serial: "{{ serial_hosts | default(1) }}"
+  pre_tasks:
+    - name: Set node role
+      ansible.builtin.set_fact:
+        is_control_plane: "{{ inventory_hostname in groups['kube_control_plane'] }}"
   roles:
     - k3s
   tags:

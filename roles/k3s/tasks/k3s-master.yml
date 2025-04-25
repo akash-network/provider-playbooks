@@ -29,13 +29,13 @@
   ansible.builtin.stat:
     path: "{{ k3s_data_dir }}/server/token"
   register: token_file
-  delegate_to: "{{ groups['control_plane'][0] }}"
+  delegate_to: "{{ groups['kube_control_plane'][0] }}"
   run_once: true
   failed_when: false
 
 - name: Set is_first_master fact
   ansible.builtin.set_fact:
-    is_first_master: "{{ inventory_hostname == groups['control_plane'][0] or token_file.stat is not defined or not token_file.stat.exists }}"
+    is_first_master: "{{ inventory_hostname == groups['kube_control_plane'][0] or token_file.stat is not defined or not token_file.stat.exists }}"
 
 - name: Debug node role
   ansible.builtin.debug:
@@ -45,7 +45,7 @@
   ansible.builtin.slurp:
     src: "{{ k3s_data_dir }}/server/token"
   register: k3s_token_b64
-  delegate_to: "{{ groups['control_plane'][0] }}"
+  delegate_to: "{{ groups['kube_control_plane'][0] }}"
   run_once: true
   when: not is_first_master and token_file.stat is defined and token_file.stat.exists
   failed_when: false
@@ -57,12 +57,12 @@
 
 - name: Show all IPv4 addresses
   ansible.builtin.set_fact:
-    master_ip: "{{ groups['control_plane'][0] }}"
+    master_ip: "{{ hostvars[groups['kube_control_plane'][0]]['internal_ip'] }}"
   when: not is_first_master
 
 - name: Set install exec parameters for additional control plane
   ansible.builtin.set_fact:
-    install_exec: "--node-ip={{ internal_ip }} {{ tls_san_arg }}"
+    install_exec: "--node-ip={{ internal_ip }} --node-name={{ inventory_hostname }} {{ tls_san_arg }}"
   when: not is_first_master
 
 - name: Add external IP if provided
@@ -85,7 +85,8 @@
     INSTALL_K3S_CHANNEL={{ k3s_version_channel }}
     INSTALL_K3S_EXEC='server {{ k3s_common_args }}
     {{ cluster_init }}
-    --node-ip={{ internal_ip }}
+    --node-ip={{ hostvars[inventory_hostname].internal_ip }}
+    --node-name={{ inventory_hostname }}
     {{ tls_san_arg }}
     {{ nodefs_dir }}
     {{ imagefs_dir }}
@@ -95,11 +96,12 @@
     INSTALL_K3S_CHANNEL={{ latestk3s | default(false) | ternary('latest', k3s_version_channel) }}
     INSTALL_K3S_EXEC='server {{ k3s_common_args }}
     --node-ip={{ internal_ip }}
+    --node-name={{ inventory_hostname }}
     {% if external_ip is defined and external_ip != '' %}--node-external-ip={{ external_ip }}{% endif %}
     {{ nodefs_dir }}
     {{ imagefs_dir }}
     {{ scheduler_config }}'
-    K3S_URL="https://{{ groups['control_plane'][0] | default(master_ip) }}:6443"
+    K3S_URL="https://{{ master_ip }}:6443"
     K3S_TOKEN="{{ k3s_token | default(token) }}" sh -"
     {% endif %}
   args:
@@ -122,3 +124,4 @@
     owner: "{{ ansible_user }}"
     group: "{{ ansible_user }}"
     mode: '0755'
+  when: is_first_master

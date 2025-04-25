@@ -1,4 +1,27 @@
 ---
+- name: Check current Helm version (if any)
+  ansible.builtin.command: helm version --short
+  register: helm_version
+  failed_when: false
+  delegate_to: node1
+  run_once: true
+
+- name: Download Helm install script
+  ansible.builtin.get_url:
+    url: https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+    dest: /tmp/get_helm.sh
+    mode: '0755'
+  delegate_to: node1
+  run_once: true
+
+- name: Run Helm install script for v3.17.3
+  environment:
+    HELM_INSTALL_VERSION: "v3.17.3"
+  ansible.builtin.command: /tmp/get_helm.sh
+  when: helm_version.stdout is not defined or 'v3.17.3' not in helm_version.stdout
+  delegate_to: node1
+  run_once: true
+
 - name: Create installation directory on control plane
   ansible.builtin.file:
     path: "{{ install_dir }}"
@@ -6,7 +29,6 @@
     mode: '0755'
   delegate_to: node1
   run_once: true
-  when: inventory_hostname != 'node1'
 
 - name: Create NVIDIA RuntimeClass manifest on control plane
   ansible.builtin.copy:
@@ -14,7 +36,6 @@
     dest: "{{ install_dir }}/nvidia-runtime-class.yml"
   delegate_to: node1
   run_once: true
-  when: inventory_hostname != 'node1'
 
 - name: Apply NVIDIA RuntimeClass from control plane
   kubernetes.core.k8s:
@@ -22,7 +43,6 @@
     src: "{{ install_dir }}/nvidia-runtime-class.yml"
   delegate_to: node1
   run_once: true
-  when: inventory_hostname != 'node1'
 
 - name: Label GPU nodes for NVIDIA support
   kubernetes.core.k8s:

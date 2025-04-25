@@ -129,7 +129,9 @@ display_welcome() {
 # Function to select playbooks to run
 select_playbooks() {
     # Initialize selected playbooks
-    SELECTED_KUBESPRAY=true  # Default to true for all playbooks
+    SELECTED_KUBERNETES=false  # New variable to track if Kubernetes is selected
+    SELECTED_KUBESPRAY=false   # Changed from true to false
+    SELECTED_K3S=false         # New variable for K3s
     SELECTED_OS=true
     SELECTED_GPU=true
     SELECTED_PROVIDER=true
@@ -137,7 +139,9 @@ select_playbooks() {
     SELECTED_ROOK_CEPH=false  # New variable for Rook-Ceph
     
     # Define playbook explanations
-    KUBESPRAY_DESC="Kubernetes installation using Kubespray (required for a new cluster)"
+    KUBERNETES_DESC="Kubernetes installation (required for a new cluster)"
+    K8S_DESC="Kubernetes installation using Kubespray (production-grade, full-featured)"
+    K3S_DESC="Kubernetes installation using K3s (lightweight, single binary, ideal for edge/IoT)"
     OS_DESC="Basic OS configuration and optimizations"
     GPU_DESC="Are there GPU nodes in the cluster?"
     PROVIDER_DESC="Akash Provider service installation and configuration"
@@ -149,16 +153,33 @@ select_playbooks() {
     echo -e "${YELLOW}Select which playbooks you want to run:${NC}"
     echo
     
-    # Kubespray
+    # Kubernetes Installation
     while true; do
-        echo -n -e "${BLUE}[?]${NC} Run Kubespray for Kubernetes installation? (Recommended for new setup) [y/n]: "
+        echo -n -e "${BLUE}[?]${NC} Install Kubernetes? (Required for new setup) [y/n]: "
         read -r response
         case $response in
-            [Yy]* ) SELECTED_KUBESPRAY=true; break;;
-            [Nn]* ) SELECTED_KUBESPRAY=false; break;;
+            [Yy]* ) SELECTED_KUBERNETES=true; break;;
+            [Nn]* ) SELECTED_KUBERNETES=false; break;;
             * ) echo "Please answer y or n.";;
         esac
     done
+    
+    if $SELECTED_KUBERNETES; then
+        # Choose between K8s and K3s
+        echo -e "\n${YELLOW}Choose your Kubernetes distribution:${NC}"
+        echo -e "${BLUE}[1]${NC} K8s (Kubespray) - Production-grade, full-featured Kubernetes"
+        echo -e "${BLUE}[2]${NC} K3s - Lightweight, single binary, ideal for edge/IoT"
+        echo
+        while true; do
+            echo -n -e "${BLUE}[?]${NC} Select distribution (1/2) [1]: "
+            read -r response
+            case $response in
+                1|"") SELECTED_KUBESPRAY=true; SELECTED_K3S=false; break;;
+                2) SELECTED_KUBESPRAY=false; SELECTED_K3S=true; break;;
+                * ) echo "Please answer 1 or 2.";;
+            esac
+        done
+    fi
     
     # OS
     while true; do
@@ -219,7 +240,15 @@ select_playbooks() {
     echo
     echo -e "${YELLOW}You have selected the following playbooks:${NC}"
     echo
-    if $SELECTED_KUBESPRAY; then print_menu_item "✓" "Kubespray - ${KUBESPRAY_DESC}"; else print_menu_item "✗" "Kubespray - ${KUBESPRAY_DESC}"; fi
+    if $SELECTED_KUBERNETES; then
+        if $SELECTED_KUBESPRAY; then
+            print_menu_item "✓" "K8s - ${K8S_DESC}"
+        else
+            print_menu_item "✓" "K3s - ${K3S_DESC}"
+        fi
+    else
+        print_menu_item "✗" "Kubernetes - ${KUBERNETES_DESC}"
+    fi
     if $SELECTED_OS; then print_menu_item "✓" "OS - ${OS_DESC}"; else print_menu_item "✗" "OS - ${OS_DESC}"; fi
     if $SELECTED_GPU; then print_menu_item "✓" "GPU - ${GPU_DESC}"; else print_menu_item "✗" "GPU - ${GPU_DESC}"; fi
     if $SELECTED_PROVIDER; then print_menu_item "✓" "Provider - ${PROVIDER_DESC}"; else print_menu_item "✗" "Provider - ${PROVIDER_DESC}"; fi
@@ -975,9 +1004,13 @@ copy_inventory() {
     cd ~/kubespray
     # Create the directory if it doesn't exist
     mkdir -p inventory/akash
-    # Copy sample inventory to the correct location
-    cp -rfp inventory/sample/* inventory/akash/
-    print_status "Inventory copied successfully"
+    # Only copy if the hosts.yaml doesn't exist
+    if [ ! -f inventory/akash/hosts.yaml ]; then
+        cp -rfp inventory/sample/* inventory/akash/
+        print_status "Sample inventory copied successfully"
+    else
+        print_status "Using existing inventory file"
+    fi
 }
 
 # Create inventory using Kubespray's inventory builder
@@ -1012,6 +1045,7 @@ for i in "${!nodes[@]}"; do
       ansible_host: ${node_ip}
       ip: ${node_ip}
       access_ip: ${node_ip}
+      internal_ip: ${node_ip}
 EOF
 done
 
@@ -1389,14 +1423,34 @@ print_status "Hosts configuration verified"
 # Run the playbook
 print_status "Running playbooks based on your selections..."
 
-# Run Kubespray if selected
+# Run Kubernetes installation if selected
+if $SELECTED_KUBERNETES; then
 if $SELECTED_KUBESPRAY; then
     print_status "Running Kubespray to set up Kubernetes cluster..."
     cd ~/kubespray
     source venv/bin/activate
     ansible-playbook -i inventory/akash/hosts.yaml cluster.yml -t kubespray -v
 else
-    print_status "Skipping Kubespray as it was not selected"
+    print_status "Running K3s installation..."
+    
+    # Simple and direct approach - force add internal_ip to host_vars files
+    print_status "Adding internal_ip to host_vars files..."
+    NODE_IP=$(grep -A 1 'node1:' ~/kubespray/inventory/akash/hosts.yaml | grep 'ansible_host' | awk '{print $2}')
+    
+    # Ensure host_vars directory exists
+    mkdir -p ~/provider-playbooks/host_vars
+    
+    # Simply force append the variable to each file
+    for i in $(seq 1 $(grep -c "node[0-9]\+:" ~/kubespray/inventory/akash/hosts.yaml | grep -A1 "hosts:" | grep -v "hosts:" | wc -l)); do
+        NODE_NAME="node$i"
+        echo -e "\n# K3s specific variables\ninternal_ip: \"$NODE_IP\"" >> ~/provider-playbooks/host_vars/${NODE_NAME}.yml
+        print_status "Added internal_ip to host_vars file for $NODE_NAME"
+    done
+    
+    ansible-playbook -i ~/kubespray/inventory/akash/hosts.yaml playbooks.yml -t k3s -v
+fi
+else
+    print_status "Skipping Kubernetes installation as it was not selected"
     print_status "Note: Make sure you have a working Kubernetes cluster before proceeding"
 fi
 
@@ -1407,6 +1461,29 @@ if $SELECTED_OS || $SELECTED_GPU || $SELECTED_PROVIDER || $SELECTED_TAILSCALE ||
     
     # Activate the virtual environment
     source ~/kubespray/venv/bin/activate
+    
+    # Check if K3s is running on node1
+    NODE_IP=$(grep -A 1 'node1:' ~/kubespray/inventory/akash/hosts.yaml | grep 'ansible_host' | awk '{print $2}')
+    if ssh -o StrictHostKeyChecking=no root@${NODE_IP} "systemctl is-active k3s" 2>/dev/null | grep -q "active"; then
+        print_status "K3s is running on node1, setting up kubeconfig..."
+        
+        # Create .kube directory if it doesn't exist
+        mkdir -p /root/.kube
+        
+        # Create symlink to k3s.yaml
+        ln -sf /etc/rancher/k3s/k3s.yaml /root/.kube/config
+        
+        # Set KUBECONFIG
+        export KUBECONFIG=/root/.kube/config
+        
+        # Verify kubeconfig
+        if ! kubectl get nodes; then
+            print_error "Failed to verify kubeconfig. Please check the configuration."
+            exit 1
+        fi
+    else
+        print_status "K3s is not running on node1, skipping kubeconfig setup"
+    fi
     
     # Run OS playbook if selected
     if $SELECTED_OS; then
@@ -1487,4 +1564,4 @@ while true; do
 done
 
 print_status "Setup process completed!"
-print_status "Thank you for using the Akash Provider Setup Script!" 
+print_status "Thank you for using the Akash Provider Setup Script!"

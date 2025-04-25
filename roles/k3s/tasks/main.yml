@@ -1,16 +1,22 @@
 ---
+- name: Import K3s installation tasks
+  ansible.builtin.include_tasks: "{{ 'k3s-master.yml' if is_control_plane else 'k3s-worker.yml' }}"
+  vars:
+    k3s_control_plane: "{{ groups['kube_control_plane'] | map('extract', hostvars, 'ansible_host') | list }}"
+    k3s_workers: "{{ groups['kube_node'] | map('extract', hostvars, 'ansible_host') | list }}"
+
 - name: import K3s installation tasks
   ansible.builtin.import_tasks: prechecks.yml
-  when: inventory_hostname in groups['control_plane']
+  when: inventory_hostname in groups['kube_control_plane']
 
 - name: import K3s installation tasks
   ansible.builtin.import_tasks: k3s-master.yml
-  when: inventory_hostname in groups['control_plane']
+  when: inventory_hostname in groups['kube_control_plane']
 
 - name: import Calico installation tasks
   ansible.builtin.import_tasks: calico.yml
-  when: inventory_hostname in groups['control_plane'][0]
+  when: inventory_hostname == groups['kube_control_plane'][0]
 
 - name: import K3s Worker tasks
   ansible.builtin.import_tasks: k3s-worker.yml
-  when: inventory_hostname in groups['workers']
+  when: not is_control_plane
