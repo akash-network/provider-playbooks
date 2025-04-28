@@ -498,55 +498,182 @@ setup_wallet() {
         return 1
     fi
     
-    # Ask if user wants to create new key or import existing
-    while true; do
-        printf "Do you want to create a new key, import from key file, import from seed phrase, or paste existing key? (new/key/seed/paste): "
-        read -r key_option
-        
-        if [ -z "$key_option" ]; then
-            print_error "Please enter an option"
-            continue
-        fi
-        
-        case "$key_option" in
-            new|key|seed|paste)
-                break
-                ;;
-            *)
-                print_error "Invalid option. Please enter 'new', 'key', 'seed', or 'paste'"
-                ;;
-        esac
-    done
-    
-    if [[ "$key_option" == "new" ]]; then
-        print_status "Creating new wallet key..."
-        # Create the key and capture the output
-        key_output=$(provider-services keys add default)
-        # Extract address from the output using grep and cut
-        wallet_address=$(echo "$key_output" | grep "address:" | cut -d: -f2 | tr -d ' ')
-        print_status "New wallet created with address: $wallet_address"
-    elif [[ "$key_option" == "key" ]]; then
-        print_status "Importing existing wallet key..."
-        read -p "Enter the path to your key.pem file: " key_path
-        if [ ! -f "$key_path" ]; then
-            print_error "Key file not found at $key_path"
-            return 1
-        fi
-        provider-services keys import default "$key_path"
-        # Get the address after import
-        wallet_address=$(provider-services keys show default -a)
-        print_status "Wallet imported with address: $wallet_address"
-    elif [[ "$key_option" == "paste" ]]; then
-        print_status "Pasting existing AKT address key and key secret..."
-        read -p "Enter your AKT address: " wallet_address
-        read -p "Enter your base64 encoded key: " key_b64
-        read -p "Enter your base64 encoded key secret: " password_b64
-        
-        # Create host_vars directory if it doesn't exist
-        mkdir -p /root/provider-playbooks/host_vars
+    # Check for existing keys
+    existing_keys=$(provider-services keys list | sed -n 's/.*name: \(.*\)/\1/p' 2>/dev/null)
+    if [ -n "$existing_keys" ]; then
+        print_status "Found existing keys: $existing_keys"
+        while true; do
+            printf "Do you want to use an existing key? (y/n): "
+            read -r use_existing
+            
+            if [ -z "$use_existing" ]; then
+                print_error "Please enter y or n"
+                continue
+            fi
+            
+            case "$use_existing" in
+                y|Y)
+                    print_status "Available keys: $existing_keys"
+                    while true; do
+                        printf "Enter the name of the key you want to use: "
+                        read -r key_name
+                        if [ -z "$key_name" ]; then
+                            print_error "Please enter a key name"
+                            continue
+                        fi
+                        if echo "$existing_keys" | grep -q "^$key_name$"; then
+                            wallet_address=$(provider-services keys show "$key_name" -a)
+                            print_status "Using existing key: $key_name with address: $wallet_address"
+                            
+                            # Export and show the key
+                            print_status "Exporting and showing key..."
+                            # Use script to capture the output
+                            script -q -c "provider-services keys export $key_name" /dev/null | tee key.pem
+                            
+                            # Clean up the output file to only include the key and remove prompt lines
+                            sed -i -n '/-----BEGIN TENDERMINT PRIVATE KEY-----/,/-----END TENDERMINT PRIVATE KEY-----/p' key.pem
 
-        # Update the host_vars file with the wallet information
-        cat > /root/provider-playbooks/host_vars/node1.yml << EOF
+                            # Check if the file was created and contains the key
+                            if [ -f "key.pem" ] && grep -q "BEGIN TENDERMINT PRIVATE KEY" key.pem; then
+                                print_status "Key has been exported to key.pem"
+                                
+                                # Base64 encode the key
+                                key_b64=$(cat key.pem | base64 | tr -d '\n')
+                                
+                                # Create host_vars directory if it doesn't exist
+                                mkdir -p /root/provider-playbooks/host_vars
+
+                                # Update the host_vars file with the wallet information
+                                cat > /root/provider-playbooks/host_vars/node1.yml << EOF
+# Node Configuration - Host Vars File
+
+## Provider Identification
+akash1_address: "$wallet_address"
+provider_b64_key: "$key_b64"
+provider_b64_keysecret: ""  # Will be filled after password entry
+
+## Network Configuration
+domain: "${provider_name}"
+region: "${provider_region}"
+
+## Organization Details
+host: "akash"
+organization: "${provider_organization}"
+email: "${provider_email}"
+website: "${provider_website}"
+
+## Tailscale Configuration
+tailscale_hostname: "node1-$(echo "${provider_name}" | tr '.' '-')"
+tailscale_authkey: "${tailscale_authkey}"
+
+# provider attributes
+attributes:
+  - key: host
+    value: akash
+  - key: tier
+    value: community
+
+## Notes:
+# - Replace empty values with your actual configuration
+# - Keep sensitive values secure and never share them publicly
+# - Ensure domain format follows Akash naming conventions
+EOF
+                                
+                                print_status "Key has been encoded and saved to /root/provider-playbooks/host_vars/node1.yml"
+                                print_status "Wallet address: $wallet_address"
+                                
+                                # Prompt for key password and save it
+                                print_status "Please enter the password you used to encrypt the key"
+                                echo -n "Password> "
+                                read -s key_password
+                                echo
+                                
+                                # Encode the password and save it
+                                password_b64=$(echo -n "$key_password" | base64 | tr -d '\n')
+                                # Update the keysecret in the file
+                                sed -i "s|provider_b64_keysecret: \"\"|provider_b64_keysecret: \"$password_b64\"|" /root/provider-playbooks/host_vars/node1.yml
+                                print_status "Key password has been encoded and saved to /root/provider-playbooks/host_vars/node1.yml"
+                                
+                                # Clean up
+                                rm -f key.pem
+                                
+                                print_status "Wallet setup and configuration complete!"
+                                print_status "Your wallet address is: $wallet_address"
+                                
+                                return 0
+                            else
+                                print_error "Failed to export key to key.pem"
+                                rm -f key.pem
+                                return 1
+                            fi
+                        else
+                            print_error "Key '$key_name' not found. Available keys: $existing_keys"
+                        fi
+                    done
+                    ;;
+                n|N)
+                    break
+                    ;;
+                *)
+                    print_error "Invalid option. Please enter y or n"
+                    ;;
+            esac
+        done
+    else
+        print_status "No existing keys found. Proceeding with key creation options..."
+    fi
+
+    # Only ask about creating/importing a key if we're not using an existing one
+    if [ "$use_existing" != "y" ] && [ "$use_existing" != "Y" ]; then
+        # Ask if user wants to create new key or import existing
+        while true; do
+            printf "Do you want to create a new key, import from key file, import from seed phrase, or paste existing key? (new/key/seed/paste): "
+            read -r key_option
+            
+            if [ -z "$key_option" ]; then
+                print_error "Please enter an option"
+                continue
+            fi
+            
+            case "$key_option" in
+                new|key|seed|paste)
+                    break
+                    ;;
+                *)
+                    print_error "Invalid option. Please enter 'new', 'key', 'seed', or 'paste'"
+                    ;;
+            esac
+        done
+        
+        if [[ "$key_option" == "new" ]]; then
+            print_status "Creating new wallet key..."
+            # Create the key and capture the output
+            key_output=$(provider-services keys add default)
+            # Extract address from the output using grep and cut
+            wallet_address=$(echo "$key_output" | grep "address:" | cut -d: -f2 | tr -d ' ')
+            print_status "New wallet created with address: $wallet_address"
+        elif [[ "$key_option" == "key" ]]; then
+            print_status "Importing existing wallet key..."
+            read -p "Enter the path to your key.pem file: " key_path
+            if [ ! -f "$key_path" ]; then
+                print_error "Key file not found at $key_path"
+                return 1
+            fi
+            provider-services keys import default "$key_path"
+            # Get the address after import
+            wallet_address=$(provider-services keys show default -a)
+            print_status "Wallet imported with address: $wallet_address"
+        elif [[ "$key_option" == "paste" ]]; then
+            print_status "Pasting existing AKT address key and key secret..."
+            read -p "Enter your AKT address: " wallet_address
+            read -p "Enter your base64 encoded key: " key_b64
+            read -p "Enter your base64 encoded key secret: " password_b64
+            
+            # Create host_vars directory if it doesn't exist
+            mkdir -p /root/provider-playbooks/host_vars
+
+            # Update the host_vars file with the wallet information
+            cat > /root/provider-playbooks/host_vars/node1.yml << EOF
 # Node Configuration - Host Vars File
 
 ## Provider Identification
@@ -580,16 +707,17 @@ attributes:
 # - Keep sensitive values secure and never share them publicly
 # - Ensure domain format follows Akash naming conventions
 EOF
-        
-        print_status "Wallet information has been saved to /root/provider-playbooks/host_vars/node1.yml"
-        print_status "Wallet address: $wallet_address"
-        return 0
-    else
-        print_status "Importing wallet from seed phrase..."
-        provider-services keys add default --recover
-        # Get the address after recovery
-        wallet_address=$(provider-services keys show default -a)
-        print_status "Wallet recovered with address: $wallet_address"
+            
+            print_status "Wallet information has been saved to /root/provider-playbooks/host_vars/node1.yml"
+            print_status "Wallet address: $wallet_address"
+            return 0
+        else
+            print_status "Importing wallet from seed phrase..."
+            provider-services keys add default --recover
+            # Get the address after recovery
+            wallet_address=$(provider-services keys show default -a)
+            print_status "Wallet recovered with address: $wallet_address"
+        fi
     fi
     
     # Verify we have a wallet address
@@ -738,29 +866,9 @@ else
     provider_website=""
 fi
 
-# Check if hosts.yaml already exists
-if [ -f ~/kubespray/inventory/akash/hosts.yaml ]; then
-    print_status "Found existing hosts.yaml file at ~/kubespray/inventory/akash/hosts.yaml"
-    while true; do
-        echo -n -e "${BLUE}[?]${NC} Do you want to use the existing hosts.yaml file? [y/n]: "
-        read -r response
-        case $response in
-            [Yy]* ) 
-                print_status "Using existing hosts.yaml file"
-                USE_EXISTING_HOSTS=true
-                break
-                ;;
-            [Nn]* ) 
-                print_status "Will create a new hosts.yaml file"
-                USE_EXISTING_HOSTS=false
-                break
-                ;;
-            * ) echo "Please answer y or n.";;
-        esac
-    done
-else
-    USE_EXISTING_HOSTS=false
-fi
+# This is set for now until we have a way to use existing hosts.yaml
+USE_EXISTING_HOSTS=false
+
 
 # Only collect node information if we're not using existing hosts.yaml
 if [ "$USE_EXISTING_HOSTS" = false ]; then
@@ -833,16 +941,16 @@ if [ "$USE_EXISTING_HOSTS" = false ]; then
         # Only continue if Rook-Ceph is still selected
         if $SELECTED_ROOK_CEPH; then
             # Get storage device information
-            device_names=$(get_input "What are the device names to use (e.g., sd*, nvme*)?" "sd*" "[a-zA-Z0-9*]+")
+            device_names=$(get_input "What are the device names to use (e.g., sd*, nvme*)?" "nvme*" "[a-zA-Z0-9*]+")
             osds_per_device=$(get_input "How many OSDs per device?" "1" "^[0-9]+$")
             
             # Storage device type selection
             while true; do
-                echo -n -e "${BLUE}[?]${NC} What type of storage device (hdd/ssd/nvme)? [hdd]: "
+                echo -n -e "${BLUE}[?]${NC} What type of storage device (hdd/ssd/nvme)? [nvme]: "
                 read -r response
                 case $response in
                     hdd|ssd|nvme) storage_device_type=$response; break;;
-                    "") storage_device_type="hdd"; break;;
+                    "") storage_device_type="nvme"; break;;
                     * ) echo "Please answer hdd, ssd, or nvme.";;
                 esac
             done
