@@ -738,29 +738,9 @@ else
     provider_website=""
 fi
 
-# Check if hosts.yaml already exists
-if [ -f ~/kubespray/inventory/akash/hosts.yaml ]; then
-    print_status "Found existing hosts.yaml file at ~/kubespray/inventory/akash/hosts.yaml"
-    while true; do
-        echo -n -e "${BLUE}[?]${NC} Do you want to use the existing hosts.yaml file? [y/n]: "
-        read -r response
-        case $response in
-            [Yy]* ) 
-                print_status "Using existing hosts.yaml file"
-                USE_EXISTING_HOSTS=true
-                break
-                ;;
-            [Nn]* ) 
-                print_status "Will create a new hosts.yaml file"
-                USE_EXISTING_HOSTS=false
-                break
-                ;;
-            * ) echo "Please answer y or n.";;
-        esac
-    done
-else
-    USE_EXISTING_HOSTS=false
-fi
+# This is set for now until we have a way to use existing hosts.yaml
+USE_EXISTING_HOSTS=false
+
 
 # Only collect node information if we're not using existing hosts.yaml
 if [ "$USE_EXISTING_HOSTS" = false ]; then
