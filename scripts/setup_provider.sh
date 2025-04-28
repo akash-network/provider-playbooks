@@ -94,6 +94,9 @@ get_input() {
     local input
     
     while true; do
+        # Clear any pending input
+        while read -r -t 0; do read -r; done
+        
         if [ -n "$default" ]; then
             read -p "$prompt [$default]: " input
             input=${input:-$default}
@@ -102,10 +105,12 @@ get_input() {
         fi
         
         if [ -z "$pattern" ] || [[ $input =~ $pattern ]]; then
-            echo "$input"
+            # Only output the valid input, not the error messages
+            echo "$input" >&1
             return 0
         else
-            print_error "Invalid input. Please try again."
+            # Send error message to stderr
+            print_error "Invalid input. Please try again." >&2
             # Clear the input variable to prevent error message from being stored
             input=""
         fi
