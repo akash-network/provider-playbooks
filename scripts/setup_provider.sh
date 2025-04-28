@@ -1464,7 +1464,8 @@ if $SELECTED_OS || $SELECTED_GPU || $SELECTED_PROVIDER || $SELECTED_TAILSCALE ||
     
     # Check if K3s is running on node1
     NODE_IP=$(grep -A 1 'node1:' ~/kubespray/inventory/akash/hosts.yaml | grep 'ansible_host' | awk '{print $2}')
-    if ssh -o StrictHostKeyChecking=no root@${NODE_IP} "systemctl is-active k3s" 2>/dev/null | grep -q "active"; then
+    K3S_STATUS=$(ssh -o StrictHostKeyChecking=no root@${NODE_IP} "systemctl is-active k3s 2>&1")
+    if [ "$K3S_STATUS" = "active" ]; then
         print_status "K3s is running on node1, setting up kubeconfig..."
         
         # Create .kube directory if it doesn't exist
