@@ -1,7 +1,12 @@
 ---
+- name: Read rook-ceph values from target node
+  ansible.builtin.slurp:
+    src: /root/provider/rook-ceph-cluster.values.yml
+  register: rook_ceph_values_file
+
 - name: Load rook-ceph values from file
   ansible.builtin.set_fact:
-    rook_ceph_values: "{{ lookup('file', '/root/provider/rook-ceph-cluster.values.yml') | from_yaml }}"
+    rook_ceph_values: "{{ rook_ceph_values_file.content | b64decode | from_yaml }}"
 
 - name: Set storage class name from rook-ceph values
   ansible.builtin.set_fact:
@@ -39,8 +44,7 @@
 - name: Extract storage class name from rook-ceph-cluster.values.yml
   ansible.builtin.set_fact:
     storage_class_name: >-
-      {{ (lookup('file', '~/provider/rook-ceph-cluster.values.yml') | from_yaml)
-        .cephBlockPools
+      {{ rook_ceph_values.cephBlockPools
         | selectattr('storageClass.enabled', 'defined')
         | selectattr('storageClass.enabled')
         | map(attribute='storageClass.name')
