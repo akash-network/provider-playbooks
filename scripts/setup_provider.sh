@@ -982,9 +982,9 @@ if [ "$USE_EXISTING_HOSTS" = false ]; then
             elif [ ${#storage_nodes[@]} -eq 2 ]; then
                 mon_count=2
                 mgr_count=2
-                pool_size=3
+                pool_size=2
                 min_size=2
-                failure_domain="host"
+                failure_domain="osd"
             else
                 mon_count=3
                 mgr_count=2
