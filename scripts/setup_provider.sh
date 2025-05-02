@@ -192,9 +192,14 @@ select_playbooks() {
                 read -r response
                 ephemeral_dir_path=$response
                 kubelet_dir_path="$ephemeral_dir_path/kubelet"
+                k8s_data_dir="$ephemeral_dir_path/containerd"
+                k3s_data_dir="$ephemeral_dir_path/k3s"
                 ;;
             n)
+                ephemeral_dir_path="/var/lib/rancher/k3s"
                 kubelet_dir_path="/var/lib/kubelet"
+                k8s_data_dir="/var/lib/containerd"
+                k3s_data_dir="/var/lib/rancher/k3s"
                 ;;
             * ) echo "Please answer y or n.";;
         esac
@@ -852,12 +857,16 @@ print_status "Gathering configuration information..."
 
 # Configure Ephemeral Storage
 print_status "Configuring Ephemeral Storage..."
+echo "debug k3s dir =$ephemeral_dir_path"
+echo "debug kubelet dir =$kubelet_dir_path"
+
 mkdir -p "$ephemeral_dir_path/k3s" "$kubelet_dir_path"
 # Create or update k8s-cluster.yml with ephemeral storage settings
 if grep -q "containerd_storage_dir" ~/kubespray/inventory/akash/group_vars/k8s_cluster/k8s-cluster.yml; then
     print_status "Ephemeral storage already configured"
 else
     cat >> ~/kubespray/inventory/akash/group_vars/k8s_cluster/k8s-cluster.yml << EOF
+
 
 # Ephemeral storage configuration
 containerd_storage_dir: "$ephemeral_dir_path/k3s"
@@ -1570,12 +1579,37 @@ print_status "Running playbooks based on your selections..."
 
 # Run Kubernetes installation if selected
 if $SELECTED_KUBERNETES; then
-if $SELECTED_KUBESPRAY; then
+  if $SELECTED_KUBESPRAY; then
     print_status "Running Kubespray to set up Kubernetes cluster..."
-    cd ~/kubespray
+
+    # 1. Desired locations (your RAID-backed /data mount)
+    imagefs_dir_path="${ephemeral_dir_path}/containerd"
+    kubelet_dir_path="${ephemeral_dir_path}/kubelet"
+
+    # 2. Inject the vars
+    KUBESPRAY_DIR=~/kubespray
+    INVENTORY_DIR="${KUBESPRAY_DIR}/inventory/akash"
+
+    mkdir -p "${INVENTORY_DIR}/group_vars/all"
+    mkdir -p "${INVENTORY_DIR}/group_vars/k8s_cluster"
+
+
+    cat > "${INVENTORY_DIR}/group_vars/all/containerd.yml" <<EOF
+containerd_storage_dir: "${imagefs_dir_path}"
+EOF
+
+    cat > "${INVENTORY_DIR}/group_vars/k8s_cluster/k8s-cluster.yml" <<EOF
+containerd_storage_dir: "${imagefs_dir_path}"
+kubelet_custom_flags: "--root-dir=${kubelet_dir_path}"
+EOF
+
+    print_status "Set containerd_storage_dir and kubelet_root_dir"
+
+    # 3. Run Kubespray
+    cd "${KUBESPRAY_DIR}"
     source venv/bin/activate
     ansible-playbook -i inventory/akash/hosts.yaml cluster.yml -t kubespray -v
-else
+  else
     print_status "Running K3s installation..."
     
     # Simple and direct approach - force add internal_ip to host_vars files
@@ -1588,11 +1622,11 @@ else
     # Simply force append the variable to each file
     for i in $(seq 1 $(grep -c "node[0-9]\+:" ~/kubespray/inventory/akash/hosts.yaml | grep -A1 "hosts:" | grep -v "hosts:" | wc -l)); do
         NODE_NAME="node$i"
-        echo -e "\n# K3s specific variables\ninternal_ip: \"$NODE_IP\"" >> ~/provider-playbooks/host_vars/${NODE_NAME}.yml
-        print_status "Added internal_ip to host_vars file for $NODE_NAME"
+        echo -e "\n# K3s specific variables\ninternal_ip: \"$NODE_IP\"\nkubelet_root_dir: \"$kubelet_dir_path\"\nk3s_data_dir: \"$k3s_data_dir\"" >> ~/provider-playbooks/host_vars/${NODE_NAME}.yml
+        print_status "Added internal_ip, kubelet_root_dir, and k3s_data_dir to host_vars file for $NODE_NAME"
     done
     
-    ansible-playbook -i ~/kubespray/inventory/akash/hosts.yaml playbooks.yml -t k3s -v
+    ansible-playbook -i ~/kubespray/inventory/akash/hosts.yaml playbooks.yml -t k3s -v --extra-vars "kubelet_root_dir=${kubelet_dir_path} k3s_data_dir=${k3s_data_dir}"
 fi
 else
     print_status "Skipping Kubernetes installation as it was not selected"
@@ -1658,7 +1692,7 @@ if $SELECTED_OS || $SELECTED_GPU || $SELECTED_PROVIDER || $SELECTED_TAILSCALE ||
     # Run Rook-Ceph playbook if selected
     if $SELECTED_ROOK_CEPH; then
         print_status "Running Rook-Ceph playbook..."
-        ansible-playbook -i ~/kubespray/inventory/akash/hosts.yaml playbooks.yml -t rook-ceph -v
+        ansible-playbook -i ~/kubespray/inventory/akash/hosts.yaml playbooks.yml -t rook-ceph -v --extra-vars "rook_ceph_data_dir=${ephemeral_dir_path}/rook" --extra-vars "kubelet_dir_path=${kubelet_dir_path}"
     fi
 else
     print_status "No provider playbooks were selected to run"

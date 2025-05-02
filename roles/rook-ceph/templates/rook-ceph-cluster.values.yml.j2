@@ -7,6 +7,7 @@ configOverride: |
   osd_pool_default_min_size = {{ min_size }}
 
 cephClusterSpec:
+  dataDirHostPath: "{{ rook_ceph_data_dir | default('/var/lib/rook') }}"
   resources:
   mon:
     count: {{ mon_count }}
