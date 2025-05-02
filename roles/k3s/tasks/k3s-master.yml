@@ -88,8 +88,8 @@
     --node-ip={{ hostvars[inventory_hostname].internal_ip }}
     --node-name={{ inventory_hostname }}
     {{ tls_san_arg }}
-    {{ nodefs_dir }}
-    {{ imagefs_dir }}
+    --kubelet-arg=root-dir={{ kubelet_root_dir }}
+    --data-dir={{ k3s_data_dir }}
     {{ scheduler_config }}' sh -"
     {% else %}
     /bin/bash -c "curl -sfL https://get.k3s.io |
@@ -98,8 +98,8 @@
     --node-ip={{ internal_ip }}
     --node-name={{ inventory_hostname }}
     {% if external_ip is defined and external_ip != '' %}--node-external-ip={{ external_ip }}{% endif %}
-    {{ nodefs_dir }}
-    {{ imagefs_dir }}
+    --kubelet-arg=root-dir={{ kubelet_root_dir }}
+    --data-dir={{ k3s_data_dir }}
     {{ scheduler_config }}'
     K3S_URL="https://{{ master_ip }}:6443"
     K3S_TOKEN="{{ k3s_token | default(token) }}" sh -"
