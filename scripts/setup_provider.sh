@@ -857,8 +857,6 @@ print_status "Gathering configuration information..."
 
 # Configure Ephemeral Storage
 print_status "Configuring Ephemeral Storage..."
-echo "debug k3s dir =$ephemeral_dir_path"
-echo "debug kubelet dir =$kubelet_dir_path"
 
 mkdir -p "$ephemeral_dir_path/k3s" "$kubelet_dir_path"
 # Create or update k8s-cluster.yml with ephemeral storage settings
