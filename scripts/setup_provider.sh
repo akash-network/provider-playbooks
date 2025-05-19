@@ -865,6 +865,7 @@ mkdir -p "$ephemeral_dir_path/k3s" "$kubelet_dir_path"
 if grep -q "containerd_storage_dir" ~/kubespray/inventory/akash/group_vars/k8s_cluster/k8s-cluster.yml; then
     print_status "Ephemeral storage already configured"
 else
+    mkdir -p ~/kubespray/inventory/akash/group_vars/k8s_cluster/
     cat >> ~/kubespray/inventory/akash/group_vars/k8s_cluster/k8s-cluster.yml << EOF
 
 
