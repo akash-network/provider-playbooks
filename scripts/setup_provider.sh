@@ -858,6 +858,10 @@ print_status "Gathering configuration information..."
 # Configure Ephemeral Storage
 print_status "Configuring Ephemeral Storage..."
 
+# Create necessary directories and files
+mkdir -p ~/kubespray/inventory/akash/group_vars/k8s_cluster
+touch ~/kubespray/inventory/akash/group_vars/k8s_cluster/k8s-cluster.yml
+
 mkdir -p "$ephemeral_dir_path/k3s" "$kubelet_dir_path"
 # Create or update k8s-cluster.yml with ephemeral storage settings
 if grep -q "containerd_storage_dir" ~/kubespray/inventory/akash/group_vars/k8s_cluster/k8s-cluster.yml; then
