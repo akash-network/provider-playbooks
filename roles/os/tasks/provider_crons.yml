@@ -18,12 +18,6 @@
     group: root
     mode: '0644'
   loop:
-    - filename: akash-restart-operator
-      content: |
-        PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
-        SHELL=/bin/bash
-        KUBECONFIG=/root/.kube/config
-        0 */4 * * * root kubectl -n akash-services rollout restart deployment/operator-inventory
     - filename: akash-delete-failed-pods
       content: |
         PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin

@@ -926,6 +926,7 @@ fi
 if grep -q "containerd_storage_dir" ~/kubespray/inventory/akash/group_vars/k8s_cluster/k8s-cluster.yml; then
     print_status "Ephemeral storage already configured"
 else
+
     print_status "Adding ephemeral storage configuration to k8s-cluster.yml..."
     cat >> ~/kubespray/inventory/akash/group_vars/k8s_cluster/k8s-cluster.yml << EOF
 
