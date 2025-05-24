@@ -376,31 +376,40 @@ setup_python_env() {
     run_with_spinner "apt-get update" "Updating package lists"
     
     # Install system packages
-    run_with_spinner "apt-get install -y python3-virtualenv python3-pip python3-kubernetes" "Installing Python packages"
+    run_with_spinner "apt-get install -y python3.12-venv python3-pip python3-kubernetes" "Installing Python packages"
     
     # Clone Kubespray if not exists
     cd ~
     if [ ! -d "kubespray" ]; then
-        run_with_spinner "git clone -b v2.26.0 --depth=1 https://github.com/kubernetes-sigs/kubespray.git" "Cloning Kubespray repository"
+        run_with_spinner "git clone -b v2.28.0 --depth=1 https://github.com/kubernetes-sigs/kubespray.git" "Cloning Kubespray repository version 2.28.0"
     fi
     
     # Setup Python virtual environment
     print_status "Setting up Python virtual environment..."
     cd ~/kubespray
-    if [ ! -d "venv" ]; then
-        # Create virtual environment
-        run_with_spinner "virtualenv --python=python3 venv" "Creating virtual environment"
-        
-        # Activate virtual environment and install requirements
-        source venv/bin/activate
-        run_with_spinner "pip3 install -r requirements.txt" "Installing Kubespray requirements"
-        run_with_spinner "pip3 install ruamel.yaml" "Installing ruamel.yaml"
-        
-        # Note: We also need the kubernetes module in the system Python
-        print_status "Note: The kubernetes module is installed system-wide via python3-kubernetes package"
-    else
-        source venv/bin/activate
+    
+    # Remove existing venv if it exists
+    if [ -d "venv" ]; then
+        rm -rf venv
     fi
+    
+    # Create virtual environment
+    run_with_spinner "python3 -m venv venv" "Creating virtual environment"
+    
+    # Activate virtual environment and install requirements
+    source venv/bin/activate || {
+        print_error "Failed to activate virtual environment"
+        exit 1
+    }
+    
+    # Upgrade pip first
+    run_with_spinner "pip install --upgrade pip" "Upgrading pip"
+    
+    # Install requirements
+    run_with_spinner "pip install -r requirements.txt" "Installing Kubespray requirements"
+    
+    # Note: We also need the kubernetes module in the system Python
+    print_status "Note: The kubernetes module is installed system-wide via python3-kubernetes package"
     
     # Verify Ansible installation
     if ! command -v ansible &> /dev/null; then
@@ -424,6 +433,32 @@ validate_ip() {
         return 0
     fi
     return 1
+}
+
+# Function to copy inventory
+copy_inventory() {
+    print_status "Copying sample inventory contents..."
+    cd ~/kubespray
+    # Create the directory if it doesn't exist
+    mkdir -p inventory/akash
+    # Always copy the sample files to ensure we have the latest structure
+    cp -rfp inventory/sample/* inventory/akash/
+    print_status "Sample inventory copied successfully"
+
+    # Ensure all required directories exist
+    mkdir -p inventory/akash/group_vars/all
+    mkdir -p inventory/akash/group_vars/k8s_cluster
+
+    # Verify key files exist
+    if [ ! -f inventory/akash/group_vars/k8s_cluster/k8s-cluster.yml ]; then
+        print_error "Failed to copy k8s-cluster.yml from sample inventory"
+        print_status "Creating a basic k8s-cluster.yml file"
+        cat > inventory/akash/group_vars/k8s_cluster/k8s-cluster.yml << EOF
+# Kubernetes configuration
+kube_network_plugin: calico
+container_manager: containerd
+EOF
+    fi
 }
 
 # Function to get node information
@@ -852,24 +887,58 @@ check_prerequisites
 # Setup Python environment
 setup_python_env
 
+# Copy the sample inventory to set up the directory structure
+cd ~/kubespray
+copy_inventory
+cd ~
+
 # Get user input
 print_status "Gathering configuration information..."
+
+# Set default values for ephemeral storage
+ephemeral_dir_path="/var/lib/rancher/k3s"
+kubelet_dir_path="/var/lib/kubelet"
+k8s_data_dir="/var/lib/containerd"
+k3s_data_dir="/var/lib/rancher/k3s"
 
 # Configure Ephemeral Storage
 print_status "Configuring Ephemeral Storage..."
 
 mkdir -p "$ephemeral_dir_path/k3s" "$kubelet_dir_path"
+
+# Check if Kubespray inventory directory exists
+if [ ! -d ~/kubespray/inventory/akash/group_vars/k8s_cluster ]; then
+    print_status "Creating Kubespray inventory directories..."
+    mkdir -p ~/kubespray/inventory/akash/group_vars/k8s_cluster
+fi
+
+# Check if k8s-cluster.yml exists
+if [ ! -f ~/kubespray/inventory/akash/group_vars/k8s_cluster/k8s-cluster.yml ]; then
+    print_status "Creating basic k8s-cluster.yml file..."
+    cat > ~/kubespray/inventory/akash/group_vars/k8s_cluster/k8s-cluster.yml << EOF
+# Kubernetes configuration
+kube_network_plugin: calico
+container_manager: containerd
+EOF
+fi
+
 # Create or update k8s-cluster.yml with ephemeral storage settings
 if grep -q "containerd_storage_dir" ~/kubespray/inventory/akash/group_vars/k8s_cluster/k8s-cluster.yml; then
     print_status "Ephemeral storage already configured"
 else
-    mkdir -p ~/kubespray/inventory/akash/group_vars/k8s_cluster/
-    cat >> ~/kubespray/inventory/akash/group_vars/k8s_cluster/k8s-cluster.yml << EOF
 
+    print_status "Adding ephemeral storage configuration to k8s-cluster.yml..."
+    cat >> ~/kubespray/inventory/akash/group_vars/k8s_cluster/k8s-cluster.yml << EOF
 
 # Ephemeral storage configuration
 containerd_storage_dir: "$ephemeral_dir_path/k3s"
-kubelet_custom_flags: "--root-dir=$kubelet_dir_path"
+EOF
+
+    # Add kubelet root directory configuration
+    cat > ~/kubespray/inventory/akash/group_vars/all/kubelet.yml << EOF
+# Kubelet extra configuration
+kubelet_config_extra_args:
+  rootDir: "$kubelet_dir_path"
 EOF
 fi
 
@@ -1166,122 +1235,102 @@ print_status "Creating required directories..."
 mkdir -p /root/provider-playbooks/host_vars
 mkdir -p /root/provider-playbooks/inventory/akash
 
-# Function to copy inventory
-copy_inventory() {
-    print_status "Copying sample inventory contents..."
-    cd ~/kubespray
-    # Create the directory if it doesn't exist
-    mkdir -p inventory/akash
-    # Only copy if the hosts.yaml doesn't exist
-    if [ ! -f inventory/akash/hosts.yaml ]; then
-        cp -rfp inventory/sample/* inventory/akash/
-        print_status "Sample inventory copied successfully"
-    else
-        print_status "Using existing inventory file"
-    fi
-}
-
 # Create inventory using Kubespray's inventory builder
 print_status "Creating inventory file using Kubespray's inventory builder..."
-cd ~/kubespray
-
 # Copy the sample inventory contents
-copy_inventory
+print_status "Copying sample inventory contents..."
+cd ~/kubespray
+# Create the directory if it doesn't exist
+mkdir -p inventory/akash
+# Always copy the sample files to ensure we have the latest structure
+cp -rfp inventory/sample/* inventory/akash/
+print_status "Sample inventory copied successfully"
 
-# Build the IPS array from collected node information
-declare -a IPS=()
-for node_info in "${nodes[@]}"; do
-    node_ip=$(echo ${node_info} | cut -d'|' -f1)
-    IPS+=($node_ip)
-done
+# Ensure all required directories exist
+mkdir -p inventory/akash/group_vars/all
+mkdir -p inventory/akash/group_vars/k8s_cluster
 
-# Create the inventory file with proper configuration
+# Verify key files exist
+if [ ! -f inventory/akash/group_vars/k8s_cluster/k8s-cluster.yml ]; then
+    print_error "Failed to copy k8s-cluster.yml from sample inventory"
+    print_status "Creating a basic k8s-cluster.yml file"
+    cat > inventory/akash/group_vars/k8s_cluster/k8s-cluster.yml << EOF
+# Kubernetes configuration
+kube_network_plugin: calico
+container_manager: containerd
+EOF
+fi
+
+# Remove existing inventory file if it exists
+if [ -f ~/kubespray/inventory/akash/inventory.ini ]; then
+    print_status "Removing existing inventory file..."
+    rm -f ~/kubespray/inventory/akash/inventory.ini
+fi
+
+# Create the inventory file with the exact format needed
 print_status "Creating inventory file with node configuration..."
-cat > ~/kubespray/inventory/akash/hosts.yaml << EOF
-all:
-  vars:
-    ansible_user: root
-  hosts:
+cat > ~/kubespray/inventory/akash/inventory.ini << EOF
+# Kubespray inventory file for Akash Provider
+# Generated by setup_provider.sh
+
+[all]
 EOF
 
 # Add all nodes as hosts
 for i in "${!nodes[@]}"; do
     node_num=$((i + 1))
     node_ip=$(echo ${nodes[$i]} | cut -d'|' -f1)
-    cat >> ~/kubespray/inventory/akash/hosts.yaml << EOF
-    node${node_num}:
-      ansible_host: ${node_ip}
-      ip: ${node_ip}
-      access_ip: ${node_ip}
-      internal_ip: ${node_ip}
+    node_user=$(echo ${nodes[$i]} | cut -d'|' -f2)
+    node_port=$(echo ${nodes[$i]} | cut -d'|' -f3)
+    
+    cat >> ~/kubespray/inventory/akash/inventory.ini << EOF
+node${node_num} ansible_host=${node_ip} ip=${node_ip} ansible_user=${node_user} ansible_port=${node_port}
 EOF
 done
 
-# Add node groups
-cat >> ~/kubespray/inventory/akash/hosts.yaml << EOF
-  children:
-    kube_control_plane:
-      hosts:
+cat >> ~/kubespray/inventory/akash/inventory.ini << EOF
+
+[kube_control_plane]
 EOF
 
-# Add control plane nodes (first 3 nodes)
-for i in "${!nodes[@]}"; do
-    node_num=$((i + 1))
-    if [ $node_num -le 3 ]; then
-        cat >> ~/kubespray/inventory/akash/hosts.yaml << EOF
-        node${node_num}:
+# Special handling for 2 nodes: only node1 is control plane and etcd
+if [ "$num_nodes" -eq 2 ]; then
+    cat >> ~/kubespray/inventory/akash/inventory.ini << EOF
+node1 etcd_member_name=etcd1
 EOF
-    fi
-done
+else
+    # Add control plane nodes (first 3 nodes or all if less than 3)
+    for ((i=0; i<num_nodes && i<3; i++)); do
+        node_num=$((i + 1))
+        cat >> ~/kubespray/inventory/akash/inventory.ini << EOF
+node${node_num} etcd_member_name=etcd${node_num}
+EOF
+    done
+fi
 
-# Add worker nodes
-cat >> ~/kubespray/inventory/akash/hosts.yaml << EOF
-    kube_node:
-      hosts:
+cat >> ~/kubespray/inventory/akash/inventory.ini << EOF
+
+[etcd:children]
+kube_control_plane
+
+[kube_node]
 EOF
 
 # Add all nodes as workers
 for i in "${!nodes[@]}"; do
     node_num=$((i + 1))
-    cat >> ~/kubespray/inventory/akash/hosts.yaml << EOF
-        node${node_num}:
+    cat >> ~/kubespray/inventory/akash/inventory.ini << EOF
+node${node_num}
 EOF
 done
 
-# Add etcd nodes
-cat >> ~/kubespray/inventory/akash/hosts.yaml << EOF
-    etcd:
-      hosts:
-EOF
-
-if [ ${#nodes[@]} -eq 2 ]; then
-    # Only assign etcd to the first node in a 2-node cluster
-    cat >> ~/kubespray/inventory/akash/hosts.yaml << EOF
-        node1:
-EOF
-else
-    # Assign up to the first 3 nodes for etcd in larger clusters
-    for i in "${!nodes[@]}"; do
-        node_num=$((i + 1))
-        if [ $node_num -le 3 ]; then
-            cat >> ~/kubespray/inventory/akash/hosts.yaml << EOF
-        node${node_num}:
-EOF
-        fi
-    done
-fi
-
-# Add remaining cluster configuration
-cat >> ~/kubespray/inventory/akash/hosts.yaml << EOF
-    k8s_cluster:
-      children:
-        kube_control_plane:
-        kube_node:
-    calico_rr:
-      hosts: {}
-EOF
-
 print_status "Inventory file created successfully"
+
+# Create a backup of the old format if it exists
+if [ -f ~/kubespray/inventory/akash/hosts.yaml ]; then
+    mv ~/kubespray/inventory/akash/hosts.yaml ~/kubespray/inventory/akash/hosts.yaml.bak
+    print_status "Created backup of old inventory format at ~/kubespray/inventory/akash/hosts.yaml.bak"
+fi
 
 # Return to provider-playbooks directory
 cd ~/provider-playbooks
@@ -1450,31 +1499,6 @@ for i in "${!nodes[@]}"; do
 done
 
 # Clone provider-playbooks if not exists
-
-# Append provider playbook to cluster.yml
-print_status "Configuring Kubespray cluster.yml..."
-
-# Remove existing cluster.yml if it exists
-if [ -f ~/kubespray/cluster.yml ]; then
-    print_status "Removing existing cluster.yml..."
-    rm -f ~/kubespray/cluster.yml
-fi
-
-# Create new cluster.yml with proper format and tags
-print_status "Creating new cluster.yml with proper tags..."
-cat > ~/kubespray/cluster.yml << EOF
----
-- name: Install Kubernetes
-  ansible.builtin.import_playbook: playbooks/cluster.yml
-  tags: kubespray
-
-- name: Run Akash provider setup
-  import_playbook: /root/provider-playbooks/playbooks.yml
-  tags: os,provider,gpu,tailscale,rook-ceph,op
-  vars:
-    ansible_roles_path: /root/provider-playbooks/roles
-EOF
-
 print_status "Created new cluster.yml configuration"
 
 # Configure Scheduler Profiles
@@ -1595,37 +1619,43 @@ if $SELECTED_KUBERNETES; then
 
     cat > "${INVENTORY_DIR}/group_vars/all/containerd.yml" <<EOF
 containerd_storage_dir: "${imagefs_dir_path}"
+containerd_sandbox_image: "registry.k8s.io/pause:3.10"
 EOF
 
     cat > "${INVENTORY_DIR}/group_vars/k8s_cluster/k8s-cluster.yml" <<EOF
 containerd_storage_dir: "${imagefs_dir_path}"
-kubelet_custom_flags: "--root-dir=${kubelet_dir_path}"
+EOF
+
+    # Add kubelet root directory to kubelet-config.yaml
+    cat > "${INVENTORY_DIR}/group_vars/all/k8s-cluster.yml" <<EOF
+# Kubelet configuration
+kubelet_config_extra_args:
+  rootDir: "${kubelet_dir_path}"
 EOF
 
     print_status "Set containerd_storage_dir and kubelet_root_dir"
 
     # 3. Run Kubespray
     cd "${KUBESPRAY_DIR}"
-    source venv/bin/activate
-    ansible-playbook -i inventory/akash/hosts.yaml cluster.yml -t kubespray -v
+    ansible-playbook -i inventory/akash/inventory.ini cluster.yml -b -v
   else
     print_status "Running K3s installation..."
     
     # Simple and direct approach - force add internal_ip to host_vars files
     print_status "Adding internal_ip to host_vars files..."
-    NODE_IP=$(grep -A 1 'node1:' ~/kubespray/inventory/akash/hosts.yaml | grep 'ansible_host' | awk '{print $2}')
+    NODE_IP=$(grep "^node1 " ~/kubespray/inventory/akash/inventory.ini | awk '{for(i=1;i<=NF;i++) if($i ~ /^ansible_host=/) print $i}' | cut -d'=' -f2)
     
     # Ensure host_vars directory exists
     mkdir -p ~/provider-playbooks/host_vars
     
     # Simply force append the variable to each file
-    for i in $(seq 1 $(grep -c "node[0-9]\+:" ~/kubespray/inventory/akash/hosts.yaml | grep -A1 "hosts:" | grep -v "hosts:" | wc -l)); do
+    for i in $(seq 1 $(grep -c "^node[0-9]* " ~/kubespray/inventory/akash/inventory.ini)); do
         NODE_NAME="node$i"
         echo -e "\n# K3s specific variables\ninternal_ip: \"$NODE_IP\"\nkubelet_root_dir: \"$kubelet_dir_path\"\nk3s_data_dir: \"$k3s_data_dir\"" >> ~/provider-playbooks/host_vars/${NODE_NAME}.yml
         print_status "Added internal_ip, kubelet_root_dir, and k3s_data_dir to host_vars file for $NODE_NAME"
     done
     
-    ansible-playbook -i ~/kubespray/inventory/akash/hosts.yaml playbooks.yml -t k3s -v --extra-vars "kubelet_root_dir=${kubelet_dir_path} k3s_data_dir=${k3s_data_dir}"
+    ansible-playbook -i ~/kubespray/inventory/akash/inventory.ini playbooks.yml -t k3s -v --extra-vars "kubelet_root_dir=${kubelet_dir_path} k3s_data_dir=${k3s_data_dir}"
 fi
 else
     print_status "Skipping Kubernetes installation as it was not selected"
@@ -1641,7 +1671,7 @@ if $SELECTED_OS || $SELECTED_GPU || $SELECTED_PROVIDER || $SELECTED_TAILSCALE ||
     source ~/kubespray/venv/bin/activate
     
     # Check if K3s is running on node1
-    NODE_IP=$(grep -A 1 'node1:' ~/kubespray/inventory/akash/hosts.yaml | grep 'ansible_host' | awk '{print $2}')
+    NODE_IP=$(grep "^node1 " ~/kubespray/inventory/akash/inventory.ini | awk '{for(i=1;i<=NF;i++) if($i ~ /^ansible_host=/) print $i}' | cut -d'=' -f2)
     K3S_STATUS=$(ssh -o StrictHostKeyChecking=no root@${NODE_IP} "systemctl is-active k3s 2>&1")
     if [ "$K3S_STATUS" = "active" ]; then
         print_status "K3s is running on node1, setting up kubeconfig..."
@@ -1667,31 +1697,31 @@ if $SELECTED_OS || $SELECTED_GPU || $SELECTED_PROVIDER || $SELECTED_TAILSCALE ||
     # Run OS playbook if selected
     if $SELECTED_OS; then
         print_status "Running OS configuration playbook..."
-        ansible-playbook -i ~/kubespray/inventory/akash/hosts.yaml playbooks.yml -t os -v
+        ansible-playbook -i ~/kubespray/inventory/akash/inventory.ini playbooks.yml -t os -v
     fi
     
     # Run GPU playbook if selected
     if $SELECTED_GPU; then
         print_status "Running GPU configuration playbook..."
-        ansible-playbook -i ~/kubespray/inventory/akash/hosts.yaml playbooks.yml -t gpu -v
+        ansible-playbook -i ~/kubespray/inventory/akash/inventory.ini playbooks.yml -t gpu -v
     fi
     
     # Run Provider playbook if selected
     if $SELECTED_PROVIDER; then
         print_status "Running Provider playbook..."
-        ansible-playbook -i ~/kubespray/inventory/akash/hosts.yaml playbooks.yml -t provider -v
+        ansible-playbook -i ~/kubespray/inventory/akash/inventory.ini playbooks.yml -t provider -v
     fi
     
     # Run Tailscale playbook if selected
     if $SELECTED_TAILSCALE; then
         print_status "Running Tailscale playbook..."
-        ansible-playbook -i ~/kubespray/inventory/akash/hosts.yaml playbooks.yml -t tailscale -v
+        ansible-playbook -i ~/kubespray/inventory/akash/inventory.ini playbooks.yml -t tailscale -v
     fi
 
     # Run Rook-Ceph playbook if selected
     if $SELECTED_ROOK_CEPH; then
         print_status "Running Rook-Ceph playbook..."
-        ansible-playbook -i ~/kubespray/inventory/akash/hosts.yaml playbooks.yml -t rook-ceph -v --extra-vars "rook_ceph_data_dir=${ephemeral_dir_path}/rook" --extra-vars "kubelet_dir_path=${kubelet_dir_path}"
+        ansible-playbook -i ~/kubespray/inventory/akash/inventory.ini playbooks.yml -t rook-ceph -v --extra-vars "rook_ceph_data_dir=${ephemeral_dir_path}/rook" --extra-vars "kubelet_dir_path=${kubelet_dir_path}"
     fi
 else
     print_status "No provider playbooks were selected to run"
