@@ -1,5 +1,5 @@
 ---
 # defaults file for GPU
 install_dir: "/root/ansible.tmp/"
-nvidia_version: 565.57.01
+nvidia_version: 570.133.20
 cruntime_toml_path: '/etc/nvidia-container-runtime/config.toml'
