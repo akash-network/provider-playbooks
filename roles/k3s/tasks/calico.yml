@@ -36,5 +36,91 @@
   retries: 10
   delay: 30
 
+- name: Get CIDR from default IPv4 IP pool
+  kubernetes.core.k8s_info:
+    api_version: crd.projectcalico.org/v1
+    kind: IPPool
+    name: default-ipv4-ippool
+  register: ippool_result
+
+- name: Extract and display CIDR
+  debug:
+    msg: "{{ ippool_result.resources[0].spec.cidr }}"
+  when: ippool_result.resources | length > 0
+
+- name: Get all nodes information
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Node
+  register: nodes_info
+
+- name: Display node names and pod CIDRs
+  ansible.builtin.debug:
+    msg: "{{ item.metadata.name }} {{ item.spec.podCIDR | default('No CIDR assigned') }}"
+  loop: "{{ nodes_info.resources }}"
+  loop_control:
+    label: "{{ item.metadata.name }}"
+
+- name: Extract first node's pod CIDR to determine supernet
+  set_fact:
+    first_pod_cidr: "{{ nodes_info.resources | selectattr('spec.podCIDR', 'defined') | map(attribute='spec.podCIDR') | first }}"
+  when: nodes_info.resources | selectattr('spec.podCIDR', 'defined') | list | length > 0
+
+- name: Calculate /16 supernet from pod CIDR
+  set_fact:
+    supernet_cidr: "{{ first_pod_cidr | regex_replace('(\\d+\\.\\d+)\\.\\d+\\.\\d+/\\d+', '\\1.0.0/16') }}"
+  when: first_pod_cidr is defined
+
+- name: Display calculated supernet
+  debug:
+    msg: "Calculated supernet: {{ supernet_cidr }}"
+  when: supernet_cidr is defined
+
+- name: Create temp-old-ipv4-ippool with modified configuration
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: crd.projectcalico.org/v1
+      kind: IPPool
+      metadata:
+        name: temp-old-ipv4-ippool
+        annotations: "{{ ippool_result.resources[0].metadata.annotations | default({}) }}"
+        labels: "{{ ippool_result.resources[0].metadata.labels | default({}) }}"
+      spec: "{{ ippool_result.resources[0].spec | combine({'nodeSelector': '!all()'}) }}"
+  when: ippool_result.resources | length > 0
+
+- name: Patch default IPv4 IP pool with calculated supernet CIDR
+  kubernetes.core.k8s:
+    state: present
+    api_version: crd.projectcalico.org/v1
+    kind: IPPool
+    name: default-ipv4-ippool
+    definition:
+      spec:
+        cidr: "{{ supernet_cidr }}"
+    merge_type: merge
+  when: supernet_cidr is defined
+
+- name: Delete pods by node using IPPool CIDR
+  shell: |
+    pool_cidr="{{ ippool_result.resources[0].spec.cidr }}"
+    # For /16 networks, use first two octets
+    network=$(echo $pool_cidr | sed 's/\([0-9]\+\.[0-9]\+\)\.[0-9]\+\.[0-9]\+\/16/\1/')
+    echo "Using network pattern: $network"
+    for node in $(kubectl get nodes -o name | cut -d"/" -f2); do
+      echo "=== NODE: $node ==="
+      pods_to_delete=$(kubectl get pods -A -o wide | grep "$network\." | grep $node | awk '{print $1 "/" $2}')
+      if [ -n "$pods_to_delete" ]; then
+        echo "Pods to be deleted:"
+        echo "$pods_to_delete"
+        echo "Sleeping for 3 seconds before deletion..."
+        sleep 3
+        kubectl get pods -A -o wide | grep "$network\." | grep $node | awk '{print "kubectl delete pod -n "$1" "$2}' | sh
+      else
+        echo "No pods found to delete on this node"
+      fi
+      echo
+    done
+
 - name: Apply coredns patch
   import_tasks: coredns.yml
