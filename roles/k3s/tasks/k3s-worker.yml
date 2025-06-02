@@ -37,7 +37,7 @@
       - "Debug: imagefs_dir = {{ k3s_data_dir | default('') }}"
 
 - name: Install K3s agent on worker node
-  ansible.builtin.command: >
+  ansible.builtin.shell: |
     curl -sfL https://get.k3s.io |
     INSTALL_K3S_CHANNEL={{ k3s_version_channel }} \
     K3S_URL=https://{{ master_ip }}:6443 \
