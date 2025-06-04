@@ -52,6 +52,7 @@ Inventory can be either in .ini or .yml format. Each host requires an internal_i
 | Variable                  | Description                                    | Required | Default                 |
 |---------------------------|------------------------------------------------|----------|-------------------------|
 | `k3s_version_channel`     | Version of K3s to install                      | No       | v1.32.3+k3s1            |
+| `k3s_cluster_cidr`        | Calico CIDR                                    | No       | 10.42.0.0/16            |
 | `disable_components`      | K3s components to disable                      | No       | traefik                 |
 | `k3s_flannel_backend`     | Flannel backend to use                         | No       | none                    |
 | `kubelet_root_dir`        | Directory for kubelet data                     | No       | /data/kubelet           |

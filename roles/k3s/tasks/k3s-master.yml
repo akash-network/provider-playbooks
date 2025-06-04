@@ -1,6 +1,10 @@
+- name: Set kubeconfig path
+  ansible.builtin.set_fact:
+    kubeconfig_path: "{{ '/' + ansible_user + '/.kube/config' if ansible_user == 'root' else '/home/' + ansible_user + '/.kube/config' }}"
+
 - name: Set facts for K3s installation
   ansible.builtin.set_fact:
-    k3s_common_args: "--disable={{ disable_components }} --flannel-backend={{ k3s_flannel_backend }}"
+    k3s_common_args: "--disable={{ disable_components }} --flannel-backend={{ k3s_flannel_backend }} --cluster-cidr={{ k3s_cluster_cidr }}"
     nodefs_dir: "--kubelet-arg=root-dir={{ kubelet_root_dir }}"
     imagefs_dir: "--data-dir={{ k3s_data_dir }}"
     cluster_init: "--cluster-init"
@@ -119,7 +123,7 @@
 
 - name: Create .kube directory
   ansible.builtin.file:
-    path: "/home/{{ ansible_user }}/.kube"
+    path: "{{ kubeconfig_path | dirname }}"
     state: directory
     owner: "{{ ansible_user }}"
     group: "{{ ansible_user }}"
