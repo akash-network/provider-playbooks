@@ -12,11 +12,13 @@
   args:
     creates: /usr/local/bin/yq
 
-- name: Modify Calico manifest to set IP autodetection method and IPv4 pool CIDR
+- name: Modify Calico manifest to set IP autodetection method
   ansible.builtin.shell: |
-    /usr/local/bin/yq eval-all '(select(.kind == "DaemonSet" and .metadata.name == "calico-node").spec.template.spec.containers[] | select(.name == "calico-node").env) += [{"name": "IP_AUTODETECTION_METHOD", "value": "kubernetes-internal-ip"},{"name": "CALICO_IPV4POOL_CIDR", "value": "10.42.0.0/16"}]' -i /tmp/calico.yaml
-  args:
-    executable: /bin/bash
+    /usr/local/bin/yq eval-all '(select(.kind == "DaemonSet" and .metadata.name == "calico-node").spec.template.spec.containers[] | select(.name == "calico-node").env) += {"name": "IP_AUTODETECTION_METHOD", "value": "kubernetes-internal-ip"}' -i /tmp/calico.yaml
+
+- name: Modify Calico manifest to set CALICO_IPV4POOL_CIDR
+  ansible.builtin.shell: |
+    /usr/local/bin/yq eval-all '(select(.kind == "DaemonSet" and .metadata.name == "calico-node").spec.template.spec.containers[] | select(.name == "calico-node").env) += {"name": "CALICO_IPV4POOL_CIDR", "value": "10.42.0.0/16"}' -i /tmp/calico.yaml
 
 - name: Apply Calico manifest
   ansible.builtin.shell: kubectl apply -f /tmp/calico.yaml
