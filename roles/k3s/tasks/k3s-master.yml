@@ -66,7 +66,7 @@
 
 - name: Set install exec parameters for additional control plane
   ansible.builtin.set_fact:
-    install_exec: "--node-ip={{ internal_ip }} --node-name={{ inventory_hostname }} {{ tls_san_arg }}"
+    install_exec: "--server https://{{ master_ip }}:6443 --node-ip={{ internal_ip }} --node-name={{ inventory_hostname }} {{ tls_san_arg }}"
   when: not is_first_master
 
 - name: Add external IP if provided
@@ -99,13 +99,10 @@
     /bin/bash -c "curl -sfL https://get.k3s.io |
     INSTALL_K3S_CHANNEL={{ latestk3s | default(false) | ternary('latest', k3s_version_channel) }}
     INSTALL_K3S_EXEC='server {{ k3s_common_args }}
-    --node-ip={{ internal_ip }}
-    --node-name={{ inventory_hostname }}
-    {% if external_ip is defined and external_ip != '' %}--node-external-ip={{ external_ip }}{% endif %}
+    {{ install_exec }}
     --kubelet-arg=root-dir={{ kubelet_root_dir }}
     --data-dir={{ k3s_data_dir }}
     {{ scheduler_config }}'
-    K3S_URL="https://{{ master_ip }}:6443"
     K3S_TOKEN="{{ k3s_token | default(token) }}" sh -"
     {% endif %}
   args:
