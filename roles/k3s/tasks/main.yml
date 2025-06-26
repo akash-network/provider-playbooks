@@ -1,9 +1,7 @@
 ---
-- name: Import K3s installation tasks
-  ansible.builtin.include_tasks: "{{ 'k3s-master.yml' if is_control_plane else 'k3s-worker.yml' }}"
-  vars:
-    k3s_control_plane: "{{ groups['kube_control_plane'] | map('extract', hostvars, 'ansible_host') | list }}"
-    k3s_workers: "{{ groups['kube_node'] | map('extract', hostvars, 'ansible_host') | list }}"
+- name: Set internal_ip for all nodes
+  ansible.builtin.set_fact:
+    internal_ip: "{{ ansible_host }}"
 
 - name: import K3s installation tasks
   ansible.builtin.import_tasks: prechecks.yml

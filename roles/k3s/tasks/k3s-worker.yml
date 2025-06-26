@@ -40,11 +40,10 @@
   ansible.builtin.shell: |
     curl -sfL https://get.k3s.io |
     INSTALL_K3S_CHANNEL={{ k3s_version_channel }} \
-    K3S_URL=https://{{ master_ip }}:6443 \
     K3S_TOKEN={{ k3s_token }} \
     K3S_DATA_DIR="{{ k3s_data_dir }}" \
     K3S_KUBELET_ARG="--root-dir={{ kubelet_root_dir }}" \
-    INSTALL_K3S_EXEC="agent --node-name={{ inventory_hostname }}" \
+    INSTALL_K3S_EXEC="agent --server https://{{ master_ip }}:6443 --node-ip={{ internal_ip }} --node-name={{ inventory_hostname }}" \
     sh -
   args:
     creates: /usr/local/bin/k3s
