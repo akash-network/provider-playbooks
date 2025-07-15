@@ -11,42 +11,6 @@ ansible-playbook -i inventory.yml playbook.yml -t k3s -e 'host=control_plane'
 ansible-playbook -i inventory.yml playbook.yml -t k3s -e 'host=workers'
 ```
 
-#### Inventory Examples
-Inventory can be either in .ini or .yml format. Each host requires an internal_ip variable to be defined, which is used for the K3s cluster communication. If you are planning to run the playbook for each host, you could alternatively pass the internal_ip using extra vars.
-
-##### INI Format
-```ini
-[control_plane]
-34.70.8.190 ansible_user=root internal_ip=10.128.0.32
-34.70.198.23 ansible_user=root internal_ip=10.128.0.35
-34.57.255.229 ansible_user=root internal_ip=10.128.0.33
-
-[workers]
-34.67.88.106 ansible_user=root internal_ip=10.128.0.34
-```
-##### YAML Format
-```yaml
-  vars:
-    ansible_user: root
-  hosts:
-    34.70.8.190:
-      internal_ip: 10.128.0.32
-    34.70.198.23:
-      internal_ip: 10.128.0.35
-    34.57.255.229:
-      internal_ip: 10.128.0.33
-    34.67.88.106:
-      internal_ip: 10.128.0.34
-  children:
-    control_plane:
-      hosts:
-        34.70.8.190:
-        34.70.198.23:
-        34.57.255.229:
-    workers:
-      hosts:
-        34.67.88.106:
-```        
 
 #### Configuration Variables
 | Variable                  | Description                                    | Required | Default                 |
