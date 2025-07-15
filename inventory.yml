@@ -1,3 +1,8 @@
+# ==========================================
+# EXAMPLE INVENTORY - FOR MANUAL EXECUTION
+# ==========================================
+# This inventory serves as an example only.
+# ==========================================
 all:
   children:
     local:
