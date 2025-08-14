@@ -7,7 +7,7 @@
     k3s_common_args: "--disable={{ disable_components }} --flannel-backend={{ k3s_flannel_backend }} --cluster-cidr={{ k3s_cluster_cidr }}"
     nodefs_dir: "--kubelet-arg=root-dir={{ kubelet_root_dir }}"
     imagefs_dir: "--data-dir={{ k3s_data_dir }}"
-    cluster_init: "--cluster-init"
+    cluster_init: "{{ '--cluster-init' if (is_first_master | bool) else '' }}"
     tls_san_arg: "{% if tls_san is defined %}--tls-san={{ tls_san }}{% endif %}"
     scheduler_config: "{% if scheduler_config_path is defined %}--kube-scheduler-arg=config={{ scheduler_config_path }}{% endif %}"
 
@@ -43,7 +43,7 @@
 
 - name: Debug node role
   ansible.builtin.debug:
-    msg: "{{ 'Installing FIRST control plane node' if is_first_master else 'Joining an additional control plane node to the cluster' }}"
+    msg: "{{ 'Installing FIRST control plane node' if is_first_master | bool else 'Joining an additional control plane node to the cluster' }}"
 
 - name: Read K3s server token
   ansible.builtin.slurp:
@@ -84,7 +84,7 @@
 
 - name: Install K3s server (first node or additional control plane)
   ansible.builtin.command: >
-    {% if is_first_master %}
+    {% if is_first_master | bool  %}
     /bin/bash -c "curl -sfL https://get.k3s.io |
     INSTALL_K3S_CHANNEL={{ k3s_version_channel }}
     INSTALL_K3S_EXEC='server {{ k3s_common_args }}
