@@ -1,7 +1,4 @@
-- name: Set internal_ip from inventory
-  ansible.builtin.set_fact:
-    internal_ip: "{{ ansible_host }}"
-
+---
 - name: Extract first two octets of the internal network
   ansible.builtin.set_fact:
     internal_network: "{{ internal_ip.split('/')[0].split('.')[:2] | join('.') }}"
