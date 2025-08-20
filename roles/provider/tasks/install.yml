@@ -48,9 +48,9 @@
     mode: '0755'
 
 - name: Copy price_script.sh to /root/provider/ directory
-  ansible.builtin.copy:
-    src: "files/price_script.sh"
-    dest: "/root/provider/"
+  ansible.builtin.template:
+    src: "templates/price_script.sh.j2"
+    dest: "/root/provider/price_script.sh"
     mode: '0755'
 
 - name: Read and base64 encode the price_script.sh file
