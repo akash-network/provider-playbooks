@@ -1662,6 +1662,33 @@ else
     print_status "Note: Make sure you have a working Kubernetes cluster before proceeding"
 fi
 
+# Install local-path-provisioner for storage (only if Rook-Ceph is not selected)
+if $SELECTED_KUBERNETES && $SELECTED_KUBESPRAY && ! $SELECTED_ROOK_CEPH; then
+    print_status "Installing local-path-provisioner (required by Akash provider)..."
+
+    # Wait for cluster to be ready
+    print_status "Waiting for Kubernetes cluster to be ready..."
+    sleep 10
+
+    # Install the provisioner
+    if kubectl apply -f https://raw.githubusercontent.com/rancher/local-path-provisioner/master/deploy/local-path-storage.yaml; then
+        print_status "local-path-provisioner installed successfully"
+
+        # Wait for it to be ready
+        print_status "Waiting for provisioner to be ready..."
+        kubectl wait --for=condition=ready pod -l app=local-path-provisioner -n local-path-storage --timeout=120s || print_warning "Timeout waiting, but continuing..."
+
+        print_status "Storage provisioner is ready"
+    else
+        print_error "Failed to install local-path-provisioner - provider deployment may fail!"
+        exit 1
+    fi
+elif $SELECTED_KUBERNETES && $SELECTED_KUBESPRAY && $SELECTED_ROOK_CEPH; then
+    print_status "Rook-Ceph selected - skipping local-path-provisioner installation"
+elif $SELECTED_KUBERNETES && $SELECTED_K3S; then
+    print_status "K3s includes local-path-provisioner by default - skipping installation"
+fi
+
 # Run provider playbooks if any are selected
 if $SELECTED_OS || $SELECTED_GPU || $SELECTED_PROVIDER || $SELECTED_TAILSCALE || $SELECTED_ROOK_CEPH; then
     # Ensure we're in the provider-playbooks directory
