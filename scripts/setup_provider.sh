@@ -1662,8 +1662,8 @@ else
     print_status "Note: Make sure you have a working Kubernetes cluster before proceeding"
 fi
 
-# Install local-path-provisioner for storage (required for Kubespray)
-if $SELECTED_KUBERNETES && $SELECTED_KUBESPRAY; then
+# Install local-path-provisioner for storage (only if Rook-Ceph is not selected)
+if $SELECTED_KUBERNETES && $SELECTED_KUBESPRAY && ! $SELECTED_ROOK_CEPH; then
     print_status "Installing local-path-provisioner (required by Akash provider)..."
 
     # Wait for cluster to be ready
@@ -1683,6 +1683,8 @@ if $SELECTED_KUBERNETES && $SELECTED_KUBESPRAY; then
         print_error "Failed to install local-path-provisioner - provider deployment may fail!"
         exit 1
     fi
+elif $SELECTED_KUBERNETES && $SELECTED_KUBESPRAY && $SELECTED_ROOK_CEPH; then
+    print_status "Rook-Ceph selected - skipping local-path-provisioner installation"
 elif $SELECTED_KUBERNETES && $SELECTED_K3S; then
     print_status "K3s includes local-path-provisioner by default - skipping installation"
 fi
