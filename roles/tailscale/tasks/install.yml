@@ -83,10 +83,7 @@
       {% else %}
       {{ tailscale_authkey }}
       {% endif %}
-    tailscale_tags_string: >-
-      {% if tailscale_tags | length > 0 %}
-      --advertise-tags={{ tailscale_prepared_tags | join(',') }}
-      {% endif %}
+    tailscale_tags_string: "{{ '--advertise-tags=' + (tailscale_prepared_tags | join(',')) if tailscale_tags | default([]) | length > 0 else '' }}"
   no_log: true
 
 - name: Authkey Type
@@ -114,7 +111,7 @@
 
 - name: Bring Tailscale Up
   become: true
-  ansible.builtin.command: "tailscale up {{ tailscale_args_string | trim }} --authkey={{ tailscale_authkey_string | trim }} --hostname={{ tailscale_hostname }} --ssh"
+  ansible.builtin.command: "tailscale up {{ tailscale_args_string | trim }}"
   changed_when: true
   register: tailscale_start
   when:
