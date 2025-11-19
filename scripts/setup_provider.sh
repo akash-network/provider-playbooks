@@ -1643,16 +1643,26 @@ EOF
     
     # Simple and direct approach - force add internal_ip to host_vars files
     print_status "Adding internal_ip to host_vars files..."
-    NODE_IP=$(grep "^node1 " ~/kubespray/inventory/akash/inventory.ini | awk '{for(i=1;i<=NF;i++) if($i ~ /^ansible_host=/) print $i}' | cut -d'=' -f2)
     
     # Ensure host_vars directory exists
     mkdir -p ~/provider-playbooks/host_vars
     
-    # Simply force append the variable to each file
-    for i in $(seq 1 $(grep -c "^node[0-9]* " ~/kubespray/inventory/akash/inventory.ini)); do
+    # Extract each node's IP address individually and set it correctly
+    # Count only the actual node definitions in the [all] section
+    NODE_COUNT=$(awk '/^\[all\]$/,/^\[/ {if ($0 ~ /^node[0-9]+ /) count++} END {print count}' ~/kubespray/inventory/akash/inventory.ini)
+    
+    for i in $(seq 1 $NODE_COUNT); do
         NODE_NAME="node$i"
-        echo -e "\n# K3s specific variables\ninternal_ip: \"$NODE_IP\"\nkubelet_root_dir: \"$kubelet_dir_path\"\nk3s_data_dir: \"$k3s_data_dir\"" >> ~/provider-playbooks/host_vars/${NODE_NAME}.yml
-        print_status "Added internal_ip, kubelet_root_dir, and k3s_data_dir to host_vars file for $NODE_NAME"
+        # Extract the specific node's IP address from the inventory file
+        NODE_IP=$(grep "^${NODE_NAME} " ~/kubespray/inventory/akash/inventory.ini | awk '{for(i=1;i<=NF;i++) if($i ~ /^ansible_host=/) print $i}' | cut -d'=' -f2)
+        
+        if [ -n "$NODE_IP" ]; then
+            echo -e "\n# K3s specific variables\ninternal_ip: \"$NODE_IP\"\nkubelet_root_dir: \"$kubelet_dir_path\"\nk3s_data_dir: \"$k3s_data_dir\"" >> ~/provider-playbooks/host_vars/${NODE_NAME}.yml
+            print_status "Added internal_ip ($NODE_IP), kubelet_root_dir, and k3s_data_dir to host_vars file for $NODE_NAME"
+        else
+            print_error "Failed to extract IP address for $NODE_NAME from inventory file"
+            exit 1
+        fi
     done
     
     ansible-playbook -i ~/kubespray/inventory/akash/inventory.ini playbooks.yml -t k3s -v --extra-vars "kubelet_root_dir=${kubelet_dir_path} k3s_data_dir=${k3s_data_dir}"
