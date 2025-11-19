@@ -20,10 +20,11 @@ It will install the complete rook-ceph operator, the rook-ceph cluster and will 
 | `mon_count`               | Number of Ceph monitor daemons                 | No       | 3                       |
 | `mgr_count`               | Number of Ceph manager daemons                 | No       | 2                       |
 | `device_filter`           | Device filter pattern for OSDs                 | No       | sd*                     |
+| `device_type`             | Device type used for OSDs                      | No       | ssd                     |
 | `osds_per_device`         | Number of OSDs per device                      | No       | 1                       |
 | `failure_domain`          | Failure domain for data placement              | No       | host                    |
 | `storage_class`           | Default storage class name                     | No       | rook-ceph-block         |
 | `zfs_for_ephemeral`       | Use ZFS for ephemeral storage                  | No       | false                   |
-| `kubelet_dir_path`        | Directory for kubelet data                     | No       | /data/kubelet           |
+| `kubelet_dir_path`        | Directory for kubelet data                     | No       | /var/lib/kubelet        |
 | `storage_nodes`           | List of nodes designated for storage           | No       | []                      |
 ```
