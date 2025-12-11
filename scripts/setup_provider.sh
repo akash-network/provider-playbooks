@@ -381,7 +381,7 @@ setup_python_env() {
     # Clone Kubespray if not exists
     cd ~
     if [ ! -d "kubespray" ]; then
-        run_with_spinner "git clone -b v2.28.0 --depth=1 https://github.com/kubernetes-sigs/kubespray.git" "Cloning Kubespray repository version 2.28.0"
+        run_with_spinner "git clone -b v2.29.1 --depth=1 https://github.com/kubernetes-sigs/kubespray.git" "Cloning Kubespray repository version 2.28.0"
     fi
     
     # Setup Python virtual environment
