@@ -1,12 +1,12 @@
 ---
 # K3s and Calico defaults
-k3s_version_channel: "v1.32.3+k3s1"
+k3s_version_channel: "v1.33.7+k3s1"
 k3s_cluster_cidr: "10.42.0.0/16"
 disable_components: "traefik,network-policy"
 k3s_flannel_backend: "none"
 kubelet_root_dir: "/var/lib/kubelet"
 k3s_data_dir: "/var/lib/rancher/k3s"
-calico_version: "v3.29.3"
+calico_version: "v3.30.5"
 calico_manifest_url: "https://raw.githubusercontent.com/projectcalico/calico/refs/tags/{{ calico_version }}/manifests/calico.yaml"
 scheduler_config_path: "{{ k3s_data_dir }}/server/etc/scheduler-config.yaml"
 tls_san: "{{ hostvars[groups['kube_control_plane'][0]]['internal_ip'] }}"
