@@ -204,14 +204,6 @@ while IFS= read -r resource; do
   fi
 done <<< "$(echo "$data_in" | jq -rc '.[]')"
 
-# CUSTOM1: Do not bid on the non-GPU requests
-# if [[ $(bc -l <<< "$gpu_price_total == 0") -eq 1 ]]; then
-# akash19jqc8tsdtzvm2zd4mcg0vx9fll4feegfduvpp8 - Greg's key added in August 2024 by Deval
-if [[ $(bc -l <<< "$gpu_price_total == 0") -eq 1 && "$AKASH_OWNER" != "akash19jqc8tsdtzvm2zd4mcg0vx9fll4feegfduvpp8" ]]; then
-  echo -n "avoid bidding on the non-GPU requests" >&2
-  exit 1
-fi
-
 # Calculate the total resource cost for the deployment request in USD
 ##
 total_cost_usd_target=$(bc -l <<< "( \
