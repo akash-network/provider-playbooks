@@ -757,6 +757,29 @@ else
     USE_EXISTING_HOSTS=false
 fi
 
+# Configure ephemeral storage base path for Kubespray
+ephemeral_storage_base="/var/lib"
+kubelet_dir_path="/var/lib/kubelet"
+containerd_dir_path="/var/lib/containerd"
+if $SELECTED_KUBESPRAY; then
+    print_status "Ephemeral Storage Configuration:"
+    while true; do
+        echo -n -e "${BLUE}[?]${NC} Use a separate storage location for Kubernetes ephemeral data? [y/n]: "
+        read -r response
+        case $response in
+            [Yy]* )
+                ephemeral_storage_base=$(get_input "Enter base path for Kubernetes ephemeral storage (e.g., /data)" "/data" "^/.*")
+                ephemeral_storage_base="${ephemeral_storage_base%/}"
+                break
+                ;;
+            [Nn]* ) break;;
+            * ) echo "Please answer y or n.";;
+        esac
+    done
+    kubelet_dir_path="${ephemeral_storage_base}/kubelet"
+    containerd_dir_path="${ephemeral_storage_base}/containerd"
+fi
+
 # Only collect node information if we're not using existing hosts.yaml
 if [ "$USE_EXISTING_HOSTS" = false ]; then
     print_status "Node Information:"
@@ -852,9 +875,6 @@ if [ "$USE_EXISTING_HOSTS" = false ]; then
                     * ) echo "Please answer y or n.";;
                 esac
             done
-            
-            # Use the consistent kubelet path that matches our ephemeral storage configuration
-            kubelet_dir_path="/data/kubelet"
             
             # Create Rook-Ceph defaults file
             mkdir -p ~/provider-playbooks/roles/rook-ceph/defaults
@@ -1311,16 +1331,41 @@ print_status "Created new cluster.yml configuration"
 
 # Configure Ephemeral Storage
 print_status "Configuring Ephemeral Storage..."
-mkdir -p /data/containerd /data/kubelet
-# Create or update k8s-cluster.yml with ephemeral storage settings
-if grep -q "containerd_storage_dir" ~/kubespray/inventory/akash/group_vars/k8s_cluster/k8s-cluster.yml; then
-    print_status "Ephemeral storage already configured"
-else
-    cat >> ~/kubespray/inventory/akash/group_vars/k8s_cluster/k8s-cluster.yml << EOF
+mkdir -p "${containerd_dir_path}" "${kubelet_dir_path}"
+
+K8S_CLUSTER_FILE=~/kubespray/inventory/akash/group_vars/k8s_cluster/k8s-cluster.yml
+containerd_present=false
+kubelet_present=false
+
+if grep -q "^containerd_storage_dir:" "$K8S_CLUSTER_FILE"; then
+    sed -i "s|^containerd_storage_dir:.*|containerd_storage_dir: \"${containerd_dir_path}\"|" "$K8S_CLUSTER_FILE"
+    containerd_present=true
+fi
+
+if grep -q "^kubelet_custom_flags:" "$K8S_CLUSTER_FILE"; then
+    # Use yq to set kubelet_custom_flags as a list (required format for Kubespray v2.27+)
+    yq eval ".kubelet_custom_flags = [\"--root-dir=${kubelet_dir_path}\"]" -i "$K8S_CLUSTER_FILE"
+    kubelet_present=true
+fi
+
+if [ "$containerd_present" = false ] && [ "$kubelet_present" = false ]; then
+    cat >> "$K8S_CLUSTER_FILE" << EOF
 
 # Ephemeral storage configuration
-containerd_storage_dir: "/data/containerd"
-kubelet_custom_flags: "--root-dir=/data/kubelet"
+containerd_storage_dir: "${containerd_dir_path}"
+kubelet_custom_flags:
+  - "--root-dir=${kubelet_dir_path}"
+EOF
+elif [ "$containerd_present" = false ]; then
+    cat >> "$K8S_CLUSTER_FILE" << EOF
+
+containerd_storage_dir: "${containerd_dir_path}"
+EOF
+elif [ "$kubelet_present" = false ]; then
+    cat >> "$K8S_CLUSTER_FILE" << EOF
+
+kubelet_custom_flags:
+  - "--root-dir=${kubelet_dir_path}"
 EOF
 fi
 
