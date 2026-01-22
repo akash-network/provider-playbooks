@@ -1,11 +1,6 @@
-- name: Set facts for K3s installation
+- name: Set kubeconfig path
   ansible.builtin.set_fact:
-    k3s_common_args: "--disable={{ disable_components }} --flannel-backend={{ k3s_flannel_backend }}"
-    nodefs_dir: "--kubelet-arg=root-dir={{ kubelet_root_dir }}"
-    imagefs_dir: "--data-dir={{ k3s_data_dir }}"
-    cluster_init: "--cluster-init"
-    tls_san_arg: "{% if tls_san is defined %}--tls-san={{ tls_san }}{% endif %}"
-    scheduler_config: "{% if scheduler_config_path is defined %}--kube-scheduler-arg=config={{ scheduler_config_path }}{% endif %}"
+    kubeconfig_path: "{{ '/' + ansible_user + '/.kube/config' if ansible_user == 'root' else '/home/' + ansible_user + '/.kube/config' }}"
 
 - name: Ensure directory exists for scheduler config
   ansible.builtin.file:
@@ -37,9 +32,18 @@
   ansible.builtin.set_fact:
     is_first_master: "{{ inventory_hostname == groups['kube_control_plane'][0] or token_file.stat is not defined or not token_file.stat.exists }}"
 
+- name: Set facts for K3s installation
+  ansible.builtin.set_fact:
+    k3s_common_args: "--disable={{ disable_components }} --flannel-backend={{ k3s_flannel_backend }} --cluster-cidr={{ k3s_cluster_cidr }}"
+    nodefs_dir: "--kubelet-arg=root-dir={{ kubelet_root_dir }}"
+    imagefs_dir: "--data-dir={{ k3s_data_dir }}"
+    cluster_init: "{{ '--cluster-init' if (is_first_master | bool) else '' }}"
+    tls_san_arg: "{% if tls_san is defined %}--tls-san={{ tls_san }}{% endif %}"
+    scheduler_config: "{% if scheduler_config_path is defined %}--kube-scheduler-arg=config={{ scheduler_config_path }}{% endif %}"
+
 - name: Debug node role
   ansible.builtin.debug:
-    msg: "{{ 'Installing FIRST control plane node' if is_first_master else 'Joining an additional control plane node to the cluster' }}"
+    msg: "{{ 'Installing FIRST control plane node' if is_first_master | bool else 'Joining an additional control plane node to the cluster' }}"
 
 - name: Read K3s server token
   ansible.builtin.slurp:
@@ -80,7 +84,7 @@
 
 - name: Install K3s server (first node or additional control plane)
   ansible.builtin.command: >
-    {% if is_first_master %}
+    {% if is_first_master | bool  %}
     /bin/bash -c "curl -sfL https://get.k3s.io |
     INSTALL_K3S_CHANNEL={{ k3s_version_channel }}
     INSTALL_K3S_EXEC='server {{ k3s_common_args }}
@@ -88,8 +92,8 @@
     --node-ip={{ hostvars[inventory_hostname].internal_ip }}
     --node-name={{ inventory_hostname }}
     {{ tls_san_arg }}
-    {{ nodefs_dir }}
-    {{ imagefs_dir }}
+    --kubelet-arg=root-dir={{ kubelet_root_dir }}
+    --data-dir={{ k3s_data_dir }}
     {{ scheduler_config }}' sh -"
     {% else %}
     /bin/bash -c "curl -sfL https://get.k3s.io |
@@ -98,8 +102,8 @@
     --node-ip={{ internal_ip }}
     --node-name={{ inventory_hostname }}
     {% if external_ip is defined and external_ip != '' %}--node-external-ip={{ external_ip }}{% endif %}
-    {{ nodefs_dir }}
-    {{ imagefs_dir }}
+    --kubelet-arg=root-dir={{ kubelet_root_dir }}
+    --data-dir={{ k3s_data_dir }}
     {{ scheduler_config }}'
     K3S_URL="https://{{ master_ip }}:6443"
     K3S_TOKEN="{{ k3s_token | default(token) }}" sh -"
@@ -119,7 +123,7 @@
 
 - name: Create .kube directory
   ansible.builtin.file:
-    path: "/home/{{ ansible_user }}/.kube"
+    path: "{{ kubeconfig_path | dirname }}"
     state: directory
     owner: "{{ ansible_user }}"
     group: "{{ ansible_user }}"

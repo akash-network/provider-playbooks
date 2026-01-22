@@ -69,29 +69,29 @@ attributes:
     value: "{{ network_speed_down }}"
 {% endif %}
 {% if price_cpu is defined and price_cpu %}
-price_cpu: {{ price_cpu }}
+price_target_cpu: {{ price_cpu }}
 {% endif %}
 {% if price_memory is defined and price_memory %}
-price_memory: {{ price_memory }}
+price_target_memory: {{ price_memory }}
 {% endif %}
 {% if price_hd_ephemeral is defined and price_hd_ephemeral %}
-price_hd_ephemeral: {{ price_hd_ephemeral }}
+price_target_hd_ephemeral: {{ price_hd_ephemeral }}
 {% endif %}
 {% if price_hd_pers_hdd is defined and price_hd_pers_hdd %}
-price_hd_pers_hdd: {{ price_hd_pers_hdd }}
+price_target_hd_pers_hdd: {{ price_hd_pers_hdd }}
 {% endif %}
 {% if price_hd_pers_ssd is defined and price_hd_pers_ssd %}
-price_hd_pers_ssd: {{ price_hd_pers_ssd }}
+price_target_hd_pers_ssd: {{ price_hd_pers_ssd }}
 {% endif %}
 {% if price_hd_pers_nvme is defined and price_hd_pers_nvme %}
-price_hd_pers_nvme: {{ price_hd_pers_nvme }}
+price_target_hd_pers_nvme: {{ price_hd_pers_nvme }}
 {% endif %}
 {% if price_endpoint is defined and price_endpoint %}
-price_endpoint: {{ price_endpoint }}
+price_target_endpoint: {{ price_endpoint }}
 {% endif %}
 {% if price_ip is defined and price_ip %}
-price_ip: {{ price_ip }}
+price_target_ip: {{ price_ip }}
 {% endif %}
 {% if price_gpu_mappings is defined and price_gpu_mappings %}
-price_gpu_mappings: "{{ price_gpu_mappings }}"
+price_target_gpu_mappings: "{{ price_gpu_mappings }}"
 {% endif %}

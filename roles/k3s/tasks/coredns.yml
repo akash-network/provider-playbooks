@@ -2,7 +2,7 @@
 - name: Copy kubeconfig to user's .kube directory
   ansible.builtin.copy:
     src: /etc/rancher/k3s/k3s.yaml
-    dest: "/home/{{ ansible_user }}/.kube/config"
+    dest: "{{ kubeconfig_path }}"
     remote_src: yes
     owner: "{{ ansible_user }}"
     group: "{{ ansible_user }}"
@@ -14,7 +14,6 @@
     kind: ConfigMap
     name: coredns
     namespace: kube-system
-    kubeconfig:  "/home/{{ ansible_user }}/.kube/config"
   register: coredns_cm
 
 - ansible.builtin.debug:
@@ -56,7 +55,6 @@
               import /etc/coredns/custom/*.override
           }
           import /etc/coredns/custom/*.server
-    kubeconfig: "/home/{{ ansible_user }}/.kube/config"
   
 - name: Confirm CoreDNS configuration patched
   ansible.builtin.debug:

@@ -94,6 +94,9 @@ get_input() {
     local input
     
     while true; do
+        # Clear any pending input
+        while read -r -t 0; do read -r; done
+        
         if [ -n "$default" ]; then
             read -p "$prompt [$default]: " input
             input=${input:-$default}
@@ -102,10 +105,12 @@ get_input() {
         fi
         
         if [ -z "$pattern" ] || [[ $input =~ $pattern ]]; then
-            echo "$input"
+            # Only output the valid input, not the error messages
+            echo "$input" >&1
             return 0
         else
-            print_error "Invalid input. Please try again."
+            # Send error message to stderr
+            print_error "Invalid input. Please try again." >&2
             # Clear the input variable to prevent error message from being stored
             input=""
         fi
@@ -179,6 +184,25 @@ select_playbooks() {
                 * ) echo "Please answer 1 or 2.";;
             esac
         done
+        echo -n -e "${BLUE}[?]${NC} Do you use a separate ephemeral storage location? [y/n]: "
+        read -r response
+        case $response in
+            y)
+                echo -n -e "${BLUE}[?]${NC} Please type the location where the separate ephemeral storage is mounted: "
+                read -r response
+                ephemeral_dir_path=$response
+                kubelet_dir_path="$ephemeral_dir_path/kubelet"
+                k8s_data_dir="$ephemeral_dir_path/containerd"
+                k3s_data_dir="$ephemeral_dir_path/k3s"
+                ;;
+            n)
+                ephemeral_dir_path="/var/lib/rancher/k3s"
+                kubelet_dir_path="/var/lib/kubelet"
+                k8s_data_dir="/var/lib/containerd"
+                k3s_data_dir="/var/lib/rancher/k3s"
+                ;;
+            * ) echo "Please answer y or n.";;
+        esac
     fi
     
     # OS
@@ -352,31 +376,40 @@ setup_python_env() {
     run_with_spinner "apt-get update" "Updating package lists"
     
     # Install system packages
-    run_with_spinner "apt-get install -y python3-virtualenv python3-pip python3-kubernetes" "Installing Python packages"
+    run_with_spinner "apt-get install -y python3.12-venv python3-pip python3-kubernetes" "Installing Python packages"
     
     # Clone Kubespray if not exists
     cd ~
     if [ ! -d "kubespray" ]; then
-        run_with_spinner "git clone -b v2.26.0 --depth=1 https://github.com/kubernetes-sigs/kubespray.git" "Cloning Kubespray repository"
+        run_with_spinner "git clone -b v2.29.1 --depth=1 https://github.com/kubernetes-sigs/kubespray.git" "Cloning Kubespray repository version 2.28.0"
     fi
     
     # Setup Python virtual environment
     print_status "Setting up Python virtual environment..."
     cd ~/kubespray
-    if [ ! -d "venv" ]; then
-        # Create virtual environment
-        run_with_spinner "virtualenv --python=python3 venv" "Creating virtual environment"
-        
-        # Activate virtual environment and install requirements
-        source venv/bin/activate
-        run_with_spinner "pip3 install -r requirements.txt" "Installing Kubespray requirements"
-        run_with_spinner "pip3 install ruamel.yaml" "Installing ruamel.yaml"
-        
-        # Note: We also need the kubernetes module in the system Python
-        print_status "Note: The kubernetes module is installed system-wide via python3-kubernetes package"
-    else
-        source venv/bin/activate
+    
+    # Remove existing venv if it exists
+    if [ -d "venv" ]; then
+        rm -rf venv
     fi
+    
+    # Create virtual environment
+    run_with_spinner "python3 -m venv venv" "Creating virtual environment"
+    
+    # Activate virtual environment and install requirements
+    source venv/bin/activate || {
+        print_error "Failed to activate virtual environment"
+        exit 1
+    }
+    
+    # Upgrade pip first
+    run_with_spinner "pip install --upgrade pip" "Upgrading pip"
+    
+    # Install requirements
+    run_with_spinner "pip install -r requirements.txt" "Installing Kubespray requirements"
+    
+    # Note: We also need the kubernetes module in the system Python
+    print_status "Note: The kubernetes module is installed system-wide via python3-kubernetes package"
     
     # Verify Ansible installation
     if ! command -v ansible &> /dev/null; then
@@ -400,6 +433,32 @@ validate_ip() {
         return 0
     fi
     return 1
+}
+
+# Function to copy inventory
+copy_inventory() {
+    print_status "Copying sample inventory contents..."
+    cd ~/kubespray
+    # Create the directory if it doesn't exist
+    mkdir -p inventory/akash
+    # Always copy the sample files to ensure we have the latest structure
+    cp -rfp inventory/sample/* inventory/akash/
+    print_status "Sample inventory copied successfully"
+
+    # Ensure all required directories exist
+    mkdir -p inventory/akash/group_vars/all
+    mkdir -p inventory/akash/group_vars/k8s_cluster
+
+    # Verify key files exist
+    if [ ! -f inventory/akash/group_vars/k8s_cluster/k8s-cluster.yml ]; then
+        print_error "Failed to copy k8s-cluster.yml from sample inventory"
+        print_status "Creating a basic k8s-cluster.yml file"
+        cat > inventory/akash/group_vars/k8s_cluster/k8s-cluster.yml << EOF
+# Kubernetes configuration
+kube_network_plugin: calico
+container_manager: containerd
+EOF
+    fi
 }
 
 # Function to get node information
@@ -493,55 +552,182 @@ setup_wallet() {
         return 1
     fi
     
-    # Ask if user wants to create new key or import existing
-    while true; do
-        printf "Do you want to create a new key, import from key file, import from seed phrase, or paste existing key? (new/key/seed/paste): "
-        read -r key_option
-        
-        if [ -z "$key_option" ]; then
-            print_error "Please enter an option"
-            continue
-        fi
-        
-        case "$key_option" in
-            new|key|seed|paste)
-                break
-                ;;
-            *)
-                print_error "Invalid option. Please enter 'new', 'key', 'seed', or 'paste'"
-                ;;
-        esac
-    done
-    
-    if [[ "$key_option" == "new" ]]; then
-        print_status "Creating new wallet key..."
-        # Create the key and capture the output
-        key_output=$(provider-services keys add default)
-        # Extract address from the output using grep and cut
-        wallet_address=$(echo "$key_output" | grep "address:" | cut -d: -f2 | tr -d ' ')
-        print_status "New wallet created with address: $wallet_address"
-    elif [[ "$key_option" == "key" ]]; then
-        print_status "Importing existing wallet key..."
-        read -p "Enter the path to your key.pem file: " key_path
-        if [ ! -f "$key_path" ]; then
-            print_error "Key file not found at $key_path"
-            return 1
-        fi
-        provider-services keys import default "$key_path"
-        # Get the address after import
-        wallet_address=$(provider-services keys show default -a)
-        print_status "Wallet imported with address: $wallet_address"
-    elif [[ "$key_option" == "paste" ]]; then
-        print_status "Pasting existing AKT address key and key secret..."
-        read -p "Enter your AKT address: " wallet_address
-        read -p "Enter your base64 encoded key: " key_b64
-        read -p "Enter your base64 encoded key secret: " password_b64
-        
-        # Create host_vars directory if it doesn't exist
-        mkdir -p /root/provider-playbooks/host_vars
+    # Check for existing keys
+    existing_keys=$(provider-services keys list | sed -n 's/.*name: \(.*\)/\1/p' 2>/dev/null)
+    if [ -n "$existing_keys" ]; then
+        print_status "Found existing keys: $existing_keys"
+        while true; do
+            printf "Do you want to use an existing key? (y/n): "
+            read -r use_existing
+            
+            if [ -z "$use_existing" ]; then
+                print_error "Please enter y or n"
+                continue
+            fi
+            
+            case "$use_existing" in
+                y|Y)
+                    print_status "Available keys: $existing_keys"
+                    while true; do
+                        printf "Enter the name of the key you want to use: "
+                        read -r key_name
+                        if [ -z "$key_name" ]; then
+                            print_error "Please enter a key name"
+                            continue
+                        fi
+                        if echo "$existing_keys" | grep -q "^$key_name$"; then
+                            wallet_address=$(provider-services keys show "$key_name" -a)
+                            print_status "Using existing key: $key_name with address: $wallet_address"
+                            
+                            # Export and show the key
+                            print_status "Exporting and showing key..."
+                            # Use script to capture the output
+                            script -q -c "provider-services keys export $key_name" /dev/null | tee key.pem
+                            
+                            # Clean up the output file to only include the key and remove prompt lines
+                            sed -i -n '/-----BEGIN TENDERMINT PRIVATE KEY-----/,/-----END TENDERMINT PRIVATE KEY-----/p' key.pem
 
-        # Update the host_vars file with the wallet information
-        cat > /root/provider-playbooks/host_vars/node1.yml << EOF
+                            # Check if the file was created and contains the key
+                            if [ -f "key.pem" ] && grep -q "BEGIN TENDERMINT PRIVATE KEY" key.pem; then
+                                print_status "Key has been exported to key.pem"
+                                
+                                # Base64 encode the key
+                                key_b64=$(cat key.pem | base64 | tr -d '\n')
+                                
+                                # Create host_vars directory if it doesn't exist
+                                mkdir -p /root/provider-playbooks/host_vars
+
+                                # Update the host_vars file with the wallet information
+                                cat > /root/provider-playbooks/host_vars/node1.yml << EOF
+# Node Configuration - Host Vars File
+
+## Provider Identification
+akash1_address: "$wallet_address"
+provider_b64_key: "$key_b64"
+provider_b64_keysecret: ""  # Will be filled after password entry
+
+## Network Configuration
+domain: "${provider_name}"
+region: "${provider_region}"
+
+## Organization Details
+host: "akash"
+organization: "${provider_organization}"
+email: "${provider_email}"
+website: "${provider_website}"
+
+## Tailscale Configuration
+tailscale_hostname: "node1-$(echo "${provider_name}" | tr '.' '-')"
+tailscale_authkey: "${tailscale_authkey}"
+
+# provider attributes
+attributes:
+  - key: host
+    value: akash
+  - key: tier
+    value: community
+
+## Notes:
+# - Replace empty values with your actual configuration
+# - Keep sensitive values secure and never share them publicly
+# - Ensure domain format follows Akash naming conventions
+EOF
+                                
+                                print_status "Key has been encoded and saved to /root/provider-playbooks/host_vars/node1.yml"
+                                print_status "Wallet address: $wallet_address"
+                                
+                                # Prompt for key password and save it
+                                print_status "Please enter the password you used to encrypt the key"
+                                echo -n "Password> "
+                                read -s key_password
+                                echo
+                                
+                                # Encode the password and save it
+                                password_b64=$(echo -n "$key_password" | base64 | tr -d '\n')
+                                # Update the keysecret in the file
+                                sed -i "s|provider_b64_keysecret: \"\"|provider_b64_keysecret: \"$password_b64\"|" /root/provider-playbooks/host_vars/node1.yml
+                                print_status "Key password has been encoded and saved to /root/provider-playbooks/host_vars/node1.yml"
+                                
+                                # Clean up
+                                rm -f key.pem
+                                
+                                print_status "Wallet setup and configuration complete!"
+                                print_status "Your wallet address is: $wallet_address"
+                                
+                                return 0
+                            else
+                                print_error "Failed to export key to key.pem"
+                                rm -f key.pem
+                                return 1
+                            fi
+                        else
+                            print_error "Key '$key_name' not found. Available keys: $existing_keys"
+                        fi
+                    done
+                    ;;
+                n|N)
+                    break
+                    ;;
+                *)
+                    print_error "Invalid option. Please enter y or n"
+                    ;;
+            esac
+        done
+    else
+        print_status "No existing keys found. Proceeding with key creation options..."
+    fi
+
+    # Only ask about creating/importing a key if we're not using an existing one
+    if [ "$use_existing" != "y" ] && [ "$use_existing" != "Y" ]; then
+        # Ask if user wants to create new key or import existing
+        while true; do
+            printf "Do you want to create a new key, import from key file, import from seed phrase, or paste existing key? (new/key/seed/paste): "
+            read -r key_option
+            
+            if [ -z "$key_option" ]; then
+                print_error "Please enter an option"
+                continue
+            fi
+            
+            case "$key_option" in
+                new|key|seed|paste)
+                    break
+                    ;;
+                *)
+                    print_error "Invalid option. Please enter 'new', 'key', 'seed', or 'paste'"
+                    ;;
+            esac
+        done
+        
+        if [[ "$key_option" == "new" ]]; then
+            print_status "Creating new wallet key..."
+            # Create the key and capture the output
+            key_output=$(provider-services keys add default)
+            # Extract address from the output using grep and cut
+            wallet_address=$(echo "$key_output" | grep "address:" | cut -d: -f2 | tr -d ' ')
+            print_status "New wallet created with address: $wallet_address"
+        elif [[ "$key_option" == "key" ]]; then
+            print_status "Importing existing wallet key..."
+            read -p "Enter the path to your key.pem file: " key_path
+            if [ ! -f "$key_path" ]; then
+                print_error "Key file not found at $key_path"
+                return 1
+            fi
+            provider-services keys import default "$key_path"
+            # Get the address after import
+            wallet_address=$(provider-services keys show default -a)
+            print_status "Wallet imported with address: $wallet_address"
+        elif [[ "$key_option" == "paste" ]]; then
+            print_status "Pasting existing AKT address key and key secret..."
+            read -p "Enter your AKT address: " wallet_address
+            read -p "Enter your base64 encoded key: " key_b64
+            read -p "Enter your base64 encoded key secret: " password_b64
+            
+            # Create host_vars directory if it doesn't exist
+            mkdir -p /root/provider-playbooks/host_vars
+
+            # Update the host_vars file with the wallet information
+            cat > /root/provider-playbooks/host_vars/node1.yml << EOF
 # Node Configuration - Host Vars File
 
 ## Provider Identification
@@ -575,16 +761,17 @@ attributes:
 # - Keep sensitive values secure and never share them publicly
 # - Ensure domain format follows Akash naming conventions
 EOF
-        
-        print_status "Wallet information has been saved to /root/provider-playbooks/host_vars/node1.yml"
-        print_status "Wallet address: $wallet_address"
-        return 0
-    else
-        print_status "Importing wallet from seed phrase..."
-        provider-services keys add default --recover
-        # Get the address after recovery
-        wallet_address=$(provider-services keys show default -a)
-        print_status "Wallet recovered with address: $wallet_address"
+            
+            print_status "Wallet information has been saved to /root/provider-playbooks/host_vars/node1.yml"
+            print_status "Wallet address: $wallet_address"
+            return 0
+        else
+            print_status "Importing wallet from seed phrase..."
+            provider-services keys add default --recover
+            # Get the address after recovery
+            wallet_address=$(provider-services keys show default -a)
+            print_status "Wallet recovered with address: $wallet_address"
+        fi
     fi
     
     # Verify we have a wallet address
@@ -700,8 +887,60 @@ check_prerequisites
 # Setup Python environment
 setup_python_env
 
+# Copy the sample inventory to set up the directory structure
+cd ~/kubespray
+copy_inventory
+cd ~
+
 # Get user input
 print_status "Gathering configuration information..."
+
+# Set default values for ephemeral storage
+ephemeral_dir_path="/var/lib/rancher/k3s"
+kubelet_dir_path="/var/lib/kubelet"
+k8s_data_dir="/var/lib/containerd"
+k3s_data_dir="/var/lib/rancher/k3s"
+
+# Configure Ephemeral Storage
+print_status "Configuring Ephemeral Storage..."
+
+mkdir -p "$ephemeral_dir_path/k3s" "$kubelet_dir_path"
+
+# Check if Kubespray inventory directory exists
+if [ ! -d ~/kubespray/inventory/akash/group_vars/k8s_cluster ]; then
+    print_status "Creating Kubespray inventory directories..."
+    mkdir -p ~/kubespray/inventory/akash/group_vars/k8s_cluster
+fi
+
+# Check if k8s-cluster.yml exists
+if [ ! -f ~/kubespray/inventory/akash/group_vars/k8s_cluster/k8s-cluster.yml ]; then
+    print_status "Creating basic k8s-cluster.yml file..."
+    cat > ~/kubespray/inventory/akash/group_vars/k8s_cluster/k8s-cluster.yml << EOF
+# Kubernetes configuration
+kube_network_plugin: calico
+container_manager: containerd
+EOF
+fi
+
+# Create or update k8s-cluster.yml with ephemeral storage settings
+if grep -q "containerd_storage_dir" ~/kubespray/inventory/akash/group_vars/k8s_cluster/k8s-cluster.yml; then
+    print_status "Ephemeral storage already configured"
+else
+
+    print_status "Adding ephemeral storage configuration to k8s-cluster.yml..."
+    cat >> ~/kubespray/inventory/akash/group_vars/k8s_cluster/k8s-cluster.yml << EOF
+
+# Ephemeral storage configuration
+containerd_storage_dir: "$ephemeral_dir_path/k3s"
+EOF
+
+    # Add kubelet root directory configuration
+    cat > ~/kubespray/inventory/akash/group_vars/all/kubelet.yml << EOF
+# Kubelet extra configuration
+kubelet_config_extra_args:
+  rootDir: "$kubelet_dir_path"
+EOF
+fi
 
 # Get provider domain name only if provider or tailscale is selected
 if $SELECTED_PROVIDER || $SELECTED_TAILSCALE; then
@@ -733,29 +972,9 @@ else
     provider_website=""
 fi
 
-# Check if hosts.yaml already exists
-if [ -f ~/kubespray/inventory/akash/hosts.yaml ]; then
-    print_status "Found existing hosts.yaml file at ~/kubespray/inventory/akash/hosts.yaml"
-    while true; do
-        echo -n -e "${BLUE}[?]${NC} Do you want to use the existing hosts.yaml file? [y/n]: "
-        read -r response
-        case $response in
-            [Yy]* ) 
-                print_status "Using existing hosts.yaml file"
-                USE_EXISTING_HOSTS=true
-                break
-                ;;
-            [Nn]* ) 
-                print_status "Will create a new hosts.yaml file"
-                USE_EXISTING_HOSTS=false
-                break
-                ;;
-            * ) echo "Please answer y or n.";;
-        esac
-    done
-else
-    USE_EXISTING_HOSTS=false
-fi
+# This is set for now until we have a way to use existing hosts.yaml
+USE_EXISTING_HOSTS=false
+
 
 # Configure ephemeral storage base path for Kubespray
 ephemeral_storage_base="/var/lib"
@@ -851,16 +1070,16 @@ if [ "$USE_EXISTING_HOSTS" = false ]; then
         # Only continue if Rook-Ceph is still selected
         if $SELECTED_ROOK_CEPH; then
             # Get storage device information
-            device_names=$(get_input "What are the device names to use (e.g., sd*, nvme*)?" "sd*" "[a-zA-Z0-9*]+")
+            device_names=$(get_input "What are the device names to use (e.g., sd*, nvme*)?" "nvme*" "[a-zA-Z0-9*]+")
             osds_per_device=$(get_input "How many OSDs per device?" "1" "^[0-9]+$")
             
             # Storage device type selection
             while true; do
-                echo -n -e "${BLUE}[?]${NC} What type of storage device (hdd/ssd/nvme)? [hdd]: "
+                echo -n -e "${BLUE}[?]${NC} What type of storage device (hdd/ssd/nvme)? [nvme]: "
                 read -r response
                 case $response in
                     hdd|ssd|nvme) storage_device_type=$response; break;;
-                    "") storage_device_type="hdd"; break;;
+                    "") storage_device_type="nvme"; break;;
                     * ) echo "Please answer hdd, ssd, or nvme.";;
                 esac
             done
@@ -879,6 +1098,24 @@ if [ "$USE_EXISTING_HOSTS" = false ]; then
             # Create Rook-Ceph defaults file
             mkdir -p ~/provider-playbooks/roles/rook-ceph/defaults
 
+            # Create CSI driver directories
+            print_status "Creating CSI driver directories..."
+            for node in "${storage_nodes[@]}"; do
+                # Extract node number from the node name (e.g., "node1" -> "1")
+                node_num=${node#node}
+                # Get node info from the nodes array (subtract 1 because array is 0-based)
+                node_info=${nodes[$((node_num-1))]}
+                node_ip=$(echo "$node_info" | cut -d'|' -f1)
+                node_user=$(echo "$node_info" | cut -d'|' -f2)
+                node_port=$(echo "$node_info" | cut -d'|' -f3)
+                
+                # Create the necessary directories for CSI driver
+                ssh -o StrictHostKeyChecking=no -p ${node_port} ${node_user}@${node_ip} "mkdir -p $kubelet_dir_path/plugins $kubelet_dir_path/pods $kubelet_dir_path/plugins_registry"
+                
+                # Ensure proper permissions
+                ssh -o StrictHostKeyChecking=no -p ${node_port} ${node_user}@${node_ip} "chmod 755 $kubelet_dir_path $kubelet_dir_path/plugins $kubelet_dir_path/pods $kubelet_dir_path/plugins_registry"
+            done
+
             # Determine MON and MGR counts based on number of storage nodes
             if [ ${#storage_nodes[@]} -eq 1 ]; then
                 mon_count=1
@@ -889,9 +1126,9 @@ if [ "$USE_EXISTING_HOSTS" = false ]; then
             elif [ ${#storage_nodes[@]} -eq 2 ]; then
                 mon_count=2
                 mgr_count=2
-                pool_size=3
+                pool_size=2
                 min_size=2
-                failure_domain="host"
+                failure_domain="osd"
             else
                 mon_count=3
                 mgr_count=2
@@ -950,8 +1187,8 @@ kubelet_dir_path: "$kubelet_dir_path"
 # Node configuration
 storage_nodes: [${storage_nodes[*]}]
 EOF
-            
-            # Create host_vars for storage nodes
+
+             # Create host_vars for storage nodes
             for node in "${storage_nodes[@]}"; do
                 mkdir -p /root/provider-playbooks/host_vars
                 if [ -f "/root/provider-playbooks/host_vars/${node}.yml" ]; then
@@ -1018,122 +1255,102 @@ print_status "Creating required directories..."
 mkdir -p /root/provider-playbooks/host_vars
 mkdir -p /root/provider-playbooks/inventory/akash
 
-# Function to copy inventory
-copy_inventory() {
-    print_status "Copying sample inventory contents..."
-    cd ~/kubespray
-    # Create the directory if it doesn't exist
-    mkdir -p inventory/akash
-    # Only copy if the hosts.yaml doesn't exist
-    if [ ! -f inventory/akash/hosts.yaml ]; then
-        cp -rfp inventory/sample/* inventory/akash/
-        print_status "Sample inventory copied successfully"
-    else
-        print_status "Using existing inventory file"
-    fi
-}
-
 # Create inventory using Kubespray's inventory builder
 print_status "Creating inventory file using Kubespray's inventory builder..."
-cd ~/kubespray
-
 # Copy the sample inventory contents
-copy_inventory
+print_status "Copying sample inventory contents..."
+cd ~/kubespray
+# Create the directory if it doesn't exist
+mkdir -p inventory/akash
+# Always copy the sample files to ensure we have the latest structure
+cp -rfp inventory/sample/* inventory/akash/
+print_status "Sample inventory copied successfully"
 
-# Build the IPS array from collected node information
-declare -a IPS=()
-for node_info in "${nodes[@]}"; do
-    node_ip=$(echo ${node_info} | cut -d'|' -f1)
-    IPS+=($node_ip)
-done
+# Ensure all required directories exist
+mkdir -p inventory/akash/group_vars/all
+mkdir -p inventory/akash/group_vars/k8s_cluster
 
-# Create the inventory file with proper configuration
+# Verify key files exist
+if [ ! -f inventory/akash/group_vars/k8s_cluster/k8s-cluster.yml ]; then
+    print_error "Failed to copy k8s-cluster.yml from sample inventory"
+    print_status "Creating a basic k8s-cluster.yml file"
+    cat > inventory/akash/group_vars/k8s_cluster/k8s-cluster.yml << EOF
+# Kubernetes configuration
+kube_network_plugin: calico
+container_manager: containerd
+EOF
+fi
+
+# Remove existing inventory file if it exists
+if [ -f ~/kubespray/inventory/akash/inventory.ini ]; then
+    print_status "Removing existing inventory file..."
+    rm -f ~/kubespray/inventory/akash/inventory.ini
+fi
+
+# Create the inventory file with the exact format needed
 print_status "Creating inventory file with node configuration..."
-cat > ~/kubespray/inventory/akash/hosts.yaml << EOF
-all:
-  vars:
-    ansible_user: root
-  hosts:
+cat > ~/kubespray/inventory/akash/inventory.ini << EOF
+# Kubespray inventory file for Akash Provider
+# Generated by setup_provider.sh
+
+[all]
 EOF
 
 # Add all nodes as hosts
 for i in "${!nodes[@]}"; do
     node_num=$((i + 1))
     node_ip=$(echo ${nodes[$i]} | cut -d'|' -f1)
-    cat >> ~/kubespray/inventory/akash/hosts.yaml << EOF
-    node${node_num}:
-      ansible_host: ${node_ip}
-      ip: ${node_ip}
-      access_ip: ${node_ip}
-      internal_ip: ${node_ip}
+    node_user=$(echo ${nodes[$i]} | cut -d'|' -f2)
+    node_port=$(echo ${nodes[$i]} | cut -d'|' -f3)
+    
+    cat >> ~/kubespray/inventory/akash/inventory.ini << EOF
+node${node_num} ansible_host=${node_ip} ip=${node_ip} ansible_user=${node_user} ansible_port=${node_port}
 EOF
 done
 
-# Add node groups
-cat >> ~/kubespray/inventory/akash/hosts.yaml << EOF
-  children:
-    kube_control_plane:
-      hosts:
+cat >> ~/kubespray/inventory/akash/inventory.ini << EOF
+
+[kube_control_plane]
 EOF
 
-# Add control plane nodes (first 3 nodes)
-for i in "${!nodes[@]}"; do
-    node_num=$((i + 1))
-    if [ $node_num -le 3 ]; then
-        cat >> ~/kubespray/inventory/akash/hosts.yaml << EOF
-        node${node_num}:
+# Special handling for 2 nodes: only node1 is control plane and etcd
+if [ "$num_nodes" -eq 2 ]; then
+    cat >> ~/kubespray/inventory/akash/inventory.ini << EOF
+node1 etcd_member_name=etcd1
 EOF
-    fi
-done
+else
+    # Add control plane nodes (first 3 nodes or all if less than 3)
+    for ((i=0; i<num_nodes && i<3; i++)); do
+        node_num=$((i + 1))
+        cat >> ~/kubespray/inventory/akash/inventory.ini << EOF
+node${node_num} etcd_member_name=etcd${node_num}
+EOF
+    done
+fi
 
-# Add worker nodes
-cat >> ~/kubespray/inventory/akash/hosts.yaml << EOF
-    kube_node:
-      hosts:
+cat >> ~/kubespray/inventory/akash/inventory.ini << EOF
+
+[etcd:children]
+kube_control_plane
+
+[kube_node]
 EOF
 
 # Add all nodes as workers
 for i in "${!nodes[@]}"; do
     node_num=$((i + 1))
-    cat >> ~/kubespray/inventory/akash/hosts.yaml << EOF
-        node${node_num}:
+    cat >> ~/kubespray/inventory/akash/inventory.ini << EOF
+node${node_num}
 EOF
 done
 
-# Add etcd nodes
-cat >> ~/kubespray/inventory/akash/hosts.yaml << EOF
-    etcd:
-      hosts:
-EOF
-
-if [ ${#nodes[@]} -eq 2 ]; then
-    # Only assign etcd to the first node in a 2-node cluster
-    cat >> ~/kubespray/inventory/akash/hosts.yaml << EOF
-        node1:
-EOF
-else
-    # Assign up to the first 3 nodes for etcd in larger clusters
-    for i in "${!nodes[@]}"; do
-        node_num=$((i + 1))
-        if [ $node_num -le 3 ]; then
-            cat >> ~/kubespray/inventory/akash/hosts.yaml << EOF
-        node${node_num}:
-EOF
-        fi
-    done
-fi
-
-# Add remaining cluster configuration
-cat >> ~/kubespray/inventory/akash/hosts.yaml << EOF
-    k8s_cluster:
-      children:
-        kube_control_plane:
-        kube_node:
-    calico_rr:
-      hosts: {}
-EOF
-
 print_status "Inventory file created successfully"
+
+# Create a backup of the old format if it exists
+if [ -f ~/kubespray/inventory/akash/hosts.yaml ]; then
+    mv ~/kubespray/inventory/akash/hosts.yaml ~/kubespray/inventory/akash/hosts.yaml.bak
+    print_status "Created backup of old inventory format at ~/kubespray/inventory/akash/hosts.yaml.bak"
+fi
 
 # Return to provider-playbooks directory
 cd ~/provider-playbooks
@@ -1302,31 +1519,6 @@ for i in "${!nodes[@]}"; do
 done
 
 # Clone provider-playbooks if not exists
-
-# Append provider playbook to cluster.yml
-print_status "Configuring Kubespray cluster.yml..."
-
-# Remove existing cluster.yml if it exists
-if [ -f ~/kubespray/cluster.yml ]; then
-    print_status "Removing existing cluster.yml..."
-    rm -f ~/kubespray/cluster.yml
-fi
-
-# Create new cluster.yml with proper format and tags
-print_status "Creating new cluster.yml with proper tags..."
-cat > ~/kubespray/cluster.yml << EOF
----
-- name: Install Kubernetes
-  ansible.builtin.import_playbook: playbooks/cluster.yml
-  tags: kubespray
-
-- name: Run Akash provider setup
-  import_playbook: /root/provider-playbooks/playbooks.yml
-  tags: os,provider,gpu,tailscale,rook-ceph,op
-  vars:
-    ansible_roles_path: /root/provider-playbooks/roles
-EOF
-
 print_status "Created new cluster.yml configuration"
 
 # Configure Ephemeral Storage
@@ -1470,33 +1662,91 @@ print_status "Running playbooks based on your selections..."
 
 # Run Kubernetes installation if selected
 if $SELECTED_KUBERNETES; then
-if $SELECTED_KUBESPRAY; then
+  if $SELECTED_KUBESPRAY; then
     print_status "Running Kubespray to set up Kubernetes cluster..."
-    cd ~/kubespray
-    source venv/bin/activate
-    ansible-playbook -i inventory/akash/hosts.yaml cluster.yml -t kubespray -v
-else
+
+    # 1. Desired locations (your RAID-backed /data mount)
+    imagefs_dir_path="${ephemeral_dir_path}/containerd"
+    kubelet_dir_path="${ephemeral_dir_path}/kubelet"
+
+    # 2. Inject the vars
+    KUBESPRAY_DIR=~/kubespray
+    INVENTORY_DIR="${KUBESPRAY_DIR}/inventory/akash"
+
+    mkdir -p "${INVENTORY_DIR}/group_vars/all"
+    mkdir -p "${INVENTORY_DIR}/group_vars/k8s_cluster"
+
+
+    cat > "${INVENTORY_DIR}/group_vars/all/containerd.yml" <<EOF
+containerd_storage_dir: "${imagefs_dir_path}"
+containerd_sandbox_image: "registry.k8s.io/pause:3.10"
+EOF
+
+    cat > "${INVENTORY_DIR}/group_vars/k8s_cluster/k8s-cluster.yml" <<EOF
+containerd_storage_dir: "${imagefs_dir_path}"
+EOF
+
+    # Add kubelet root directory to kubelet-config.yaml
+    cat > "${INVENTORY_DIR}/group_vars/all/k8s-cluster.yml" <<EOF
+# Kubelet configuration
+kubelet_config_extra_args:
+  rootDir: "${kubelet_dir_path}"
+EOF
+
+    print_status "Set containerd_storage_dir and kubelet_root_dir"
+
+    # 3. Run Kubespray
+    cd "${KUBESPRAY_DIR}"
+    ansible-playbook -i inventory/akash/inventory.ini cluster.yml -b -v
+  else
     print_status "Running K3s installation..."
     
     # Simple and direct approach - force add internal_ip to host_vars files
     print_status "Adding internal_ip to host_vars files..."
-    NODE_IP=$(grep -A 1 'node1:' ~/kubespray/inventory/akash/hosts.yaml | grep 'ansible_host' | awk '{print $2}')
+    NODE_IP=$(grep "^node1 " ~/kubespray/inventory/akash/inventory.ini | awk '{for(i=1;i<=NF;i++) if($i ~ /^ansible_host=/) print $i}' | cut -d'=' -f2)
     
     # Ensure host_vars directory exists
     mkdir -p ~/provider-playbooks/host_vars
     
     # Simply force append the variable to each file
-    for i in $(seq 1 $(grep -c "node[0-9]\+:" ~/kubespray/inventory/akash/hosts.yaml | grep -A1 "hosts:" | grep -v "hosts:" | wc -l)); do
+    for i in $(seq 1 $(grep -c "^node[0-9]* " ~/kubespray/inventory/akash/inventory.ini)); do
         NODE_NAME="node$i"
-        echo -e "\n# K3s specific variables\ninternal_ip: \"$NODE_IP\"" >> ~/provider-playbooks/host_vars/${NODE_NAME}.yml
-        print_status "Added internal_ip to host_vars file for $NODE_NAME"
+        echo -e "\n# K3s specific variables\ninternal_ip: \"$NODE_IP\"\nkubelet_root_dir: \"$kubelet_dir_path\"\nk3s_data_dir: \"$k3s_data_dir\"" >> ~/provider-playbooks/host_vars/${NODE_NAME}.yml
+        print_status "Added internal_ip, kubelet_root_dir, and k3s_data_dir to host_vars file for $NODE_NAME"
     done
     
-    ansible-playbook -i ~/kubespray/inventory/akash/hosts.yaml playbooks.yml -t k3s -v
+    ansible-playbook -i ~/kubespray/inventory/akash/inventory.ini playbooks.yml -t k3s -v --extra-vars "kubelet_root_dir=${kubelet_dir_path} k3s_data_dir=${k3s_data_dir}"
 fi
 else
     print_status "Skipping Kubernetes installation as it was not selected"
     print_status "Note: Make sure you have a working Kubernetes cluster before proceeding"
+fi
+
+# Install local-path-provisioner for storage (only if Rook-Ceph is not selected)
+if $SELECTED_KUBERNETES && $SELECTED_KUBESPRAY && ! $SELECTED_ROOK_CEPH; then
+    print_status "Installing local-path-provisioner (required by Akash provider)..."
+
+    # Wait for cluster to be ready
+    print_status "Waiting for Kubernetes cluster to be ready..."
+    sleep 10
+
+    # Install the provisioner
+    if kubectl apply -f https://raw.githubusercontent.com/rancher/local-path-provisioner/master/deploy/local-path-storage.yaml; then
+        print_status "local-path-provisioner installed successfully"
+
+        # Wait for it to be ready
+        print_status "Waiting for provisioner to be ready..."
+        kubectl wait --for=condition=ready pod -l app=local-path-provisioner -n local-path-storage --timeout=120s || print_warning "Timeout waiting, but continuing..."
+
+        print_status "Storage provisioner is ready"
+    else
+        print_error "Failed to install local-path-provisioner - provider deployment may fail!"
+        exit 1
+    fi
+elif $SELECTED_KUBERNETES && $SELECTED_KUBESPRAY && $SELECTED_ROOK_CEPH; then
+    print_status "Rook-Ceph selected - skipping local-path-provisioner installation"
+elif $SELECTED_KUBERNETES && $SELECTED_K3S; then
+    print_status "K3s includes local-path-provisioner by default - skipping installation"
 fi
 
 # Run provider playbooks if any are selected
@@ -1508,7 +1758,7 @@ if $SELECTED_OS || $SELECTED_GPU || $SELECTED_PROVIDER || $SELECTED_TAILSCALE ||
     source ~/kubespray/venv/bin/activate
     
     # Check if K3s is running on node1
-    NODE_IP=$(grep -A 1 'node1:' ~/kubespray/inventory/akash/hosts.yaml | grep 'ansible_host' | awk '{print $2}')
+    NODE_IP=$(grep "^node1 " ~/kubespray/inventory/akash/inventory.ini | awk '{for(i=1;i<=NF;i++) if($i ~ /^ansible_host=/) print $i}' | cut -d'=' -f2)
     K3S_STATUS=$(ssh -o StrictHostKeyChecking=no root@${NODE_IP} "systemctl is-active k3s 2>&1")
     if [ "$K3S_STATUS" = "active" ]; then
         print_status "K3s is running on node1, setting up kubeconfig..."
@@ -1534,31 +1784,31 @@ if $SELECTED_OS || $SELECTED_GPU || $SELECTED_PROVIDER || $SELECTED_TAILSCALE ||
     # Run OS playbook if selected
     if $SELECTED_OS; then
         print_status "Running OS configuration playbook..."
-        ansible-playbook -i ~/kubespray/inventory/akash/hosts.yaml playbooks.yml -t os -v
+        ansible-playbook -i ~/kubespray/inventory/akash/inventory.ini playbooks.yml -t os -v
     fi
     
     # Run GPU playbook if selected
     if $SELECTED_GPU; then
         print_status "Running GPU configuration playbook..."
-        ansible-playbook -i ~/kubespray/inventory/akash/hosts.yaml playbooks.yml -t gpu -v
+        ansible-playbook -i ~/kubespray/inventory/akash/inventory.ini playbooks.yml -t gpu -v
     fi
     
     # Run Provider playbook if selected
     if $SELECTED_PROVIDER; then
         print_status "Running Provider playbook..."
-        ansible-playbook -i ~/kubespray/inventory/akash/hosts.yaml playbooks.yml -t provider -v
+        ansible-playbook -i ~/kubespray/inventory/akash/inventory.ini playbooks.yml -t provider -v
     fi
     
     # Run Tailscale playbook if selected
     if $SELECTED_TAILSCALE; then
         print_status "Running Tailscale playbook..."
-        ansible-playbook -i ~/kubespray/inventory/akash/hosts.yaml playbooks.yml -t tailscale -v
+        ansible-playbook -i ~/kubespray/inventory/akash/inventory.ini playbooks.yml -t tailscale -v
     fi
 
     # Run Rook-Ceph playbook if selected
     if $SELECTED_ROOK_CEPH; then
         print_status "Running Rook-Ceph playbook..."
-        ansible-playbook -i ~/kubespray/inventory/akash/hosts.yaml playbooks.yml -t rook-ceph -v
+        ansible-playbook -i ~/kubespray/inventory/akash/inventory.ini playbooks.yml -t rook-ceph -v --extra-vars "rook_ceph_data_dir=${ephemeral_dir_path}/rook" --extra-vars "kubelet_dir_path=${kubelet_dir_path}"
     fi
 else
     print_status "No provider playbooks were selected to run"

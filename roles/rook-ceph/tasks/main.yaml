@@ -3,6 +3,23 @@
 - name: Proceed running the subsequent steps only if this is a K8s control plane
   ansible.builtin.import_tasks: init.yaml
 
+- name: Check current Helm version (if any)
+  ansible.builtin.command: helm version --short
+  register: helm_version
+  failed_when: false
+
+- name: Download Helm install script
+  ansible.builtin.get_url:
+    url: https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+    dest: /tmp/get_helm.sh
+    mode: '0755'
+
+- name: Run Helm install script for v3.17.3
+  environment:
+    HELM_INSTALL_VERSION: "v3.17.3"
+  ansible.builtin.command: /tmp/get_helm.sh
+  when: helm_version.stdout is not defined or 'v3.17.3' not in helm_version.stdout
+
 - name: Install Rook-CEPH Operator
   ansible.builtin.import_tasks: rook_ceph_operator.yaml
 
