@@ -184,21 +184,17 @@ select_playbooks() {
                 * ) echo "Please answer 1 or 2.";;
             esac
         done
-        echo -n -e "${BLUE}[?]${NC} Do you use a separate ephemeral storage location? [y/n]: "
+        echo -n -e "${BLUE}[?]${NC} Do you use a separate storage location for container images? [y/n]: "
         read -r response
         case $response in
             y)
-                echo -n -e "${BLUE}[?]${NC} Please type the location where the separate ephemeral storage is mounted: "
+                echo -n -e "${BLUE}[?]${NC} Please type the location where the storage is mounted (e.g., /data): "
                 read -r response
-                ephemeral_dir_path=$response
-                kubelet_dir_path="$ephemeral_dir_path/kubelet"
-                k8s_data_dir="$ephemeral_dir_path/containerd"
-                k3s_data_dir="$ephemeral_dir_path/k3s"
+                containerd_dir_path="$response/containerd"
+                k3s_data_dir="$response/rancher/k3s"
                 ;;
             n)
-                ephemeral_dir_path="/var/lib/rancher/k3s"
-                kubelet_dir_path="/var/lib/kubelet"
-                k8s_data_dir="/var/lib/containerd"
+                containerd_dir_path="/var/lib/containerd"
                 k3s_data_dir="/var/lib/rancher/k3s"
                 ;;
             * ) echo "Please answer y or n.";;
@@ -895,16 +891,24 @@ cd ~
 # Get user input
 print_status "Gathering configuration information..."
 
-# Set default values for ephemeral storage
-ephemeral_dir_path="/var/lib/rancher/k3s"
-kubelet_dir_path="/var/lib/kubelet"
-k8s_data_dir="/var/lib/containerd"
-k3s_data_dir="/var/lib/rancher/k3s"
+# Set default values for storage (will be overridden if user selected custom path earlier)
+# These defaults are only used if Kubernetes was not selected
+containerd_dir_path="${containerd_dir_path:-/var/lib/containerd}"
+k3s_data_dir="${k3s_data_dir:-/var/lib/rancher/k3s}"
 
-# Configure Ephemeral Storage
-print_status "Configuring Ephemeral Storage..."
+# Configure Container Storage
+print_status "Configuring Container Storage..."
 
-mkdir -p "$ephemeral_dir_path/k3s" "$kubelet_dir_path"
+# Create directories based on which Kubernetes distribution was selected
+if $SELECTED_KUBERNETES; then
+    if $SELECTED_K3S; then
+        # K3s needs k3s_data_dir
+        mkdir -p "$k3s_data_dir"
+    elif $SELECTED_KUBESPRAY; then
+        # Kubespray needs containerd_dir_path
+        mkdir -p "$containerd_dir_path"
+    fi
+fi
 
 # Check if Kubespray inventory directory exists
 if [ ! -d ~/kubespray/inventory/akash/group_vars/k8s_cluster ]; then
@@ -912,35 +916,8 @@ if [ ! -d ~/kubespray/inventory/akash/group_vars/k8s_cluster ]; then
     mkdir -p ~/kubespray/inventory/akash/group_vars/k8s_cluster
 fi
 
-# Check if k8s-cluster.yml exists
-if [ ! -f ~/kubespray/inventory/akash/group_vars/k8s_cluster/k8s-cluster.yml ]; then
-    print_status "Creating basic k8s-cluster.yml file..."
-    cat > ~/kubespray/inventory/akash/group_vars/k8s_cluster/k8s-cluster.yml << EOF
-# Kubernetes configuration
-kube_network_plugin: calico
-container_manager: containerd
-EOF
-fi
-
-# Create or update k8s-cluster.yml with ephemeral storage settings
-if grep -q "containerd_storage_dir" ~/kubespray/inventory/akash/group_vars/k8s_cluster/k8s-cluster.yml; then
-    print_status "Ephemeral storage already configured"
-else
-
-    print_status "Adding ephemeral storage configuration to k8s-cluster.yml..."
-    cat >> ~/kubespray/inventory/akash/group_vars/k8s_cluster/k8s-cluster.yml << EOF
-
-# Ephemeral storage configuration
-containerd_storage_dir: "$ephemeral_dir_path/k3s"
-EOF
-
-    # Add kubelet root directory configuration
-    cat > ~/kubespray/inventory/akash/group_vars/all/kubelet.yml << EOF
-# Kubelet extra configuration
-kubelet_config_extra_args:
-  rootDir: "$kubelet_dir_path"
-EOF
-fi
+# Note: Kubespray configuration files will be created later after gathering user input
+# This ensures the correct storage paths are used based on user preferences
 
 # Get provider domain name only if provider or tailscale is selected
 if $SELECTED_PROVIDER || $SELECTED_TAILSCALE; then
@@ -975,29 +952,7 @@ fi
 # This is set for now until we have a way to use existing hosts.yaml
 USE_EXISTING_HOSTS=false
 
-
-# Configure ephemeral storage base path for Kubespray
-ephemeral_storage_base="/var/lib"
-kubelet_dir_path="/var/lib/kubelet"
-containerd_dir_path="/var/lib/containerd"
-if $SELECTED_KUBESPRAY; then
-    print_status "Ephemeral Storage Configuration:"
-    while true; do
-        echo -n -e "${BLUE}[?]${NC} Use a separate storage location for Kubernetes ephemeral data? [y/n]: "
-        read -r response
-        case $response in
-            [Yy]* )
-                ephemeral_storage_base=$(get_input "Enter base path for Kubernetes ephemeral storage (e.g., /data)" "/data" "^/.*")
-                ephemeral_storage_base="${ephemeral_storage_base%/}"
-                break
-                ;;
-            [Nn]* ) break;;
-            * ) echo "Please answer y or n.";;
-        esac
-    done
-    kubelet_dir_path="${ephemeral_storage_base}/kubelet"
-    containerd_dir_path="${ephemeral_storage_base}/containerd"
-fi
+# Container storage paths are already set earlier during playbook selection
 
 # Only collect node information if we're not using existing hosts.yaml
 if [ "$USE_EXISTING_HOSTS" = false ]; then
@@ -1666,8 +1621,8 @@ if $SELECTED_KUBERNETES; then
     print_status "Running Kubespray to set up Kubernetes cluster..."
 
     # 1. Desired locations (your RAID-backed /data mount)
-    imagefs_dir_path="${ephemeral_dir_path}/containerd"
-    kubelet_dir_path="${ephemeral_dir_path}/kubelet"
+    imagefs_dir_path="${containerd_dir_path}"
+    # kubelet_dir_path already set earlier based on user input
 
     # 2. Inject the vars
     KUBESPRAY_DIR=~/kubespray
@@ -1678,22 +1633,15 @@ if $SELECTED_KUBERNETES; then
 
 
     cat > "${INVENTORY_DIR}/group_vars/all/containerd.yml" <<EOF
-containerd_storage_dir: "${imagefs_dir_path}"
+containerd_storage_dir: "${containerd_dir_path}"
 containerd_sandbox_image: "registry.k8s.io/pause:3.10"
 EOF
 
     cat > "${INVENTORY_DIR}/group_vars/k8s_cluster/k8s-cluster.yml" <<EOF
-containerd_storage_dir: "${imagefs_dir_path}"
+containerd_storage_dir: "${containerd_dir_path}"
 EOF
 
-    # Add kubelet root directory to kubelet-config.yaml
-    cat > "${INVENTORY_DIR}/group_vars/all/k8s-cluster.yml" <<EOF
-# Kubelet configuration
-kubelet_config_extra_args:
-  rootDir: "${kubelet_dir_path}"
-EOF
-
-    print_status "Set containerd_storage_dir and kubelet_root_dir"
+    print_status "Set containerd_storage_dir to ${containerd_dir_path}"
 
     # 3. Run Kubespray
     cd "${KUBESPRAY_DIR}"
@@ -1711,11 +1659,11 @@ EOF
     # Simply force append the variable to each file
     for i in $(seq 1 $(grep -c "^node[0-9]* " ~/kubespray/inventory/akash/inventory.ini)); do
         NODE_NAME="node$i"
-        echo -e "\n# K3s specific variables\ninternal_ip: \"$NODE_IP\"\nkubelet_root_dir: \"$kubelet_dir_path\"\nk3s_data_dir: \"$k3s_data_dir\"" >> ~/provider-playbooks/host_vars/${NODE_NAME}.yml
-        print_status "Added internal_ip, kubelet_root_dir, and k3s_data_dir to host_vars file for $NODE_NAME"
+        echo -e "\n# K3s specific variables\ninternal_ip: \"$NODE_IP\"\nk3s_data_dir: \"$k3s_data_dir\"" >> ~/provider-playbooks/host_vars/${NODE_NAME}.yml
+        print_status "Added internal_ip and k3s_data_dir to host_vars file for $NODE_NAME"
     done
     
-    ansible-playbook -i ~/kubespray/inventory/akash/inventory.ini playbooks.yml -t k3s -v --extra-vars "kubelet_root_dir=${kubelet_dir_path} k3s_data_dir=${k3s_data_dir}"
+    ansible-playbook -i ~/kubespray/inventory/akash/inventory.ini playbooks.yml -t k3s -v --extra-vars "k3s_data_dir=${k3s_data_dir}"
 fi
 else
     print_status "Skipping Kubernetes installation as it was not selected"
