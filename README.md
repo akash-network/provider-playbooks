@@ -119,6 +119,11 @@ Common issues and solutions:
    - Check storage node resources
    - Review Ceph operator logs
    - Ensure proper network connectivity between storage nodes
+   
+5. **Provider Pod Stuck in Pending (Storage)**
+   - If `akash-provider-0` is stuck waiting for volume binding, the setup script automatically patches the `local-path` StorageClass to use `Immediate` binding mode
+   - This prevents issues in single-node clusters where `WaitForFirstConsumer` causes deadlocks
+   - Manual fix: `kubectl patch storageclass local-path -p '{"volumeBindingMode":"Immediate"}'`
 
 ## Support
 
