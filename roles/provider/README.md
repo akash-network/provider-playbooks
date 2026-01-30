@@ -47,3 +47,19 @@ These variables can be customized but have default values:
 |----------|-------------|---------|
 | `provider_version` | Version for the provider CRDs to deploy| 0.6.11-rc1 |
 | `chain_id` | Blockchain network ID | Nil |
+
+## Storage Configuration
+
+### Local Path Provisioner
+
+The setup script automatically configures the `local-path` StorageClass to use `volumeBindingMode: Immediate` instead of the default `WaitForFirstConsumer`. This prevents issues in single-node clusters where the provider StatefulSet pod can get stuck waiting for volume binding.
+
+**Why this matters:**
+- `WaitForFirstConsumer` requires a pod to be scheduled before binding the volume
+- In single-node setups, this can create a deadlock where the pod can't start without the volume, and the volume won't bind without the pod
+- `Immediate` binding mode binds the volume as soon as the PVC is created
+
+**Manual configuration (if needed):**
+```bash
+kubectl patch storageclass local-path -p '{"volumeBindingMode":"Immediate"}'
+```

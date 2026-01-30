@@ -1687,6 +1687,15 @@ if $SELECTED_KUBERNETES && $SELECTED_KUBESPRAY && ! $SELECTED_ROOK_CEPH; then
         kubectl wait --for=condition=ready pod -l app=local-path-provisioner -n local-path-storage --timeout=120s || print_warning "Timeout waiting, but continuing..."
 
         print_status "Storage provisioner is ready"
+        
+        # Patch StorageClass to use Immediate binding mode
+        # This prevents issues with single-node clusters where WaitForFirstConsumer causes deadlocks
+        print_status "Configuring StorageClass for immediate volume binding..."
+        if kubectl patch storageclass local-path -p '{"volumeBindingMode":"Immediate"}' 2>/dev/null; then
+            print_status "StorageClass configured successfully"
+        else
+            print_warning "Failed to patch StorageClass - provider may have issues in single-node setups"
+        fi
     else
         print_error "Failed to install local-path-provisioner - provider deployment may fail!"
         exit 1
@@ -1695,6 +1704,14 @@ elif $SELECTED_KUBERNETES && $SELECTED_KUBESPRAY && $SELECTED_ROOK_CEPH; then
     print_status "Rook-Ceph selected - skipping local-path-provisioner installation"
 elif $SELECTED_KUBERNETES && $SELECTED_K3S; then
     print_status "K3s includes local-path-provisioner by default - skipping installation"
+    
+    # Patch K3s StorageClass to use Immediate binding mode
+    print_status "Configuring K3s StorageClass for immediate volume binding..."
+    if kubectl patch storageclass local-path -p '{"volumeBindingMode":"Immediate"}' 2>/dev/null; then
+        print_status "StorageClass configured successfully"
+    else
+        print_warning "Failed to patch StorageClass - provider may have issues in single-node setups"
+    fi
 fi
 
 # Run provider playbooks if any are selected
