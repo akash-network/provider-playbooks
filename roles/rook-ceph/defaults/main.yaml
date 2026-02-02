@@ -9,11 +9,16 @@ mgr_count: 2
 
 # Storage configuration (these will be overridden by setup_provider.sh)
 device_filter: "sd*"
+device_type: "ssd"
 osds_per_device: 1
 failure_domain: "host"
-storage_class: "rook-ceph-block"
+storage_class: "beta2"
 zfs_for_ephemeral: "false"
-kubelet_dir_path: "/data/kubelet"
+# Kubelet directory path
+# This must match the kubelet's --root-dir configuration
+# Leave empty to use k3s default (/var/lib/kubelet)
+# Set to /data/kubelet if using custom kubelet root dir
+kubelet_dir_path: ""
 
 # Node configuration (will be set by setup_provider.sh)
 storage_nodes: []
