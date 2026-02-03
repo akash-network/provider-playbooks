@@ -26,3 +26,23 @@ ansible-playbook -i inventory.yml playbook.yml -t k3s -e 'host=workers'
 | `scheduler_config_path`   | Path to scheduler configuration                | No       | Generated from data_dir |
 | `tls_san`                 | TLS SAN for the K3s API server                 | No       | First control plane host|
 
+#### TLS SAN Configuration
+The `tls_san` variable allows you to add additional IP addresses or hostnames to the Kubernetes API server TLS certificate. This is useful for accessing the cluster through VPNs (like Tailscale) or load balancers.
+
+When using the `setup_provider.sh` script:
+- If Tailscale is selected, the script automatically installs Tailscale on the control plane node first
+- It retrieves the Tailscale IP address and configures it as the TLS SAN
+- This allows you to access the Kubernetes API server securely through your Tailscale network
+
+You can also manually set a custom TLS SAN by adding it to your host_vars file:
+```yaml
+tls_san: "100.64.0.1"  # Your custom IP or hostname
+```
+
+
+
+
+UUID=b4b63d1a-2833-491c-b84c-d4c1e529a12c /data ext4 defaults 0 2
+UUID=fa6f82eb-9464-4322-abef-a20b7597b44e /data ext4 defaults 0 2
+UUID=e5ea5f8e-95a0-4fdc-bd9c-bdf40ba20cd4 /data ext4 defaults 0 2
+UUID=413d4644-2760-4035-9751-70302246d3fc /data ext4 defaults 0 2

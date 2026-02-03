@@ -1,0 +1,100 @@
+---
+# Detect Rook-Ceph Persistent Storage
+- name: Check for storage class with akash.network label
+  kubernetes.core.k8s_info:
+    kind: StorageClass
+    label_selectors:
+      - akash.network=true
+  register: akash_storage_classes
+  failed_when: false
+
+- name: Set persistent storage facts
+  ansible.builtin.set_fact:
+    has_persistent_storage: true
+    storage_class_name: "{{ akash_storage_classes.resources[0].metadata.name }}"
+  when:
+    - akash_storage_classes.resources is defined
+    - akash_storage_classes.resources | length > 0
+
+- name: Display persistent storage detection result
+  ansible.builtin.debug:
+    msg: "{{ 'Persistent storage detected: ' + storage_class_name if has_persistent_storage | default(false) else 'Persistent storage: Not configured' }}"
+
+# Process GPU information for Akash attributes
+# gpu_detect.yml already ran and set gpu_nodes if GPUs are present
+- name: Parse GPU model information for Akash attributes
+  ansible.builtin.set_fact:
+    gpu_model_raw: "{{ gpu_nodes[0].split(',')[1] | trim }}"
+    gpu_memory_mib: "{{ gpu_nodes[0].split(',')[2] | trim | regex_replace(' MiB', '') }}"
+  when:
+    - has_gpu | default(false)
+    - gpu_nodes is defined
+    - gpu_nodes | length > 0
+
+- name: Format GPU model name for Akash (lowercase, no spaces/special chars)
+  ansible.builtin.set_fact:
+    gpu_model_name: "{{ gpu_model_raw | lower | regex_replace('nvidia ', '') | regex_replace('geforce ', '') | regex_replace('[^a-z0-9]', '') }}"
+    gpu_memory_gi: "{{ (gpu_memory_mib | int / 1024) | round(0, 'floor') | int }}Gi"
+  when:
+    - gpu_model_raw is defined
+    - gpu_memory_mib is defined
+
+- name: Detect GPU interface type (PCIe vs SXM)
+  ansible.builtin.shell: nvidia-smi --query-gpu=pci.bus_id --format=csv,noheader | head -1
+  register: gpu_bus_id
+  changed_when: false
+  failed_when: false
+  when: has_gpu | default(false)
+
+- name: Set GPU interface type
+  ansible.builtin.set_fact:
+    gpu_interface: "{{ 'sxm' if 'SXM' in gpu_bus_id.stdout | default('') or gpu_model_name is search('h100|h200|a100') else 'pcie' }}"
+  when:
+    - has_gpu | default(false)
+    - gpu_model_name is defined
+
+- name: Display GPU attributes for Akash
+  ansible.builtin.debug:
+    msg: |
+      GPU Attributes for Akash Provider:
+      - Model: {{ gpu_model_name | default('Not detected') }}
+      - Memory: {{ gpu_memory_gi | default('Not detected') }}
+      - Interface: {{ gpu_interface | default('Not detected') }}
+      - CUDA Version: {{ cuda_version | default('Not detected') }}
+      - SHM Support: Enabled (capabilities/storage/2/class: ram)
+  when: has_gpu | default(false)
+
+- name: Display complete capability summary
+  ansible.builtin.debug:
+    msg: |
+      Akash Provider Capabilities Summary:
+      =====================================
+      Storage Classes:
+      {% if has_persistent_storage | default(false) %}
+        - Persistent: {{ storage_class_name }}
+      {% endif %}
+      {% if has_gpu | default(false) %}
+        - SHM (RAM): Enabled for GPU workloads
+      {% endif %}
+      {% if not has_persistent_storage | default(false) and not has_gpu | default(false) %}
+        - Default (local-path) only
+      {% endif %}
+      
+      GPU Support:
+      {% if has_gpu | default(false) %}
+        - Model: {{ gpu_model_name }}
+        - Memory: {{ gpu_memory_gi }}
+        - Interface: {{ gpu_interface }}
+        - CUDA: {{ cuda_version | default('Unknown') }}
+      {% else %}
+        - Not configured
+      {% endif %}
+      
+      Inventory Operator Storage Classes:
+        - default
+      {% if has_persistent_storage | default(false) %}
+        - {{ storage_class_name }}
+      {% endif %}
+      {% if has_gpu | default(false) %}
+        - ram
+      {% endif %}

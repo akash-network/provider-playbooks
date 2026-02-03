@@ -1,7 +1,7 @@
 ---
 - name: Read rook-ceph values from target node
   ansible.builtin.slurp:
-    src: /root/provider/rook-ceph-cluster.values.yml
+    src: /root/rook-ceph/rook-ceph-cluster.values.yml
   register: rook_ceph_values_file
 
 - name: Load rook-ceph values from file
@@ -33,13 +33,11 @@
     name: rbd
     state: present
 
-- name: Remove old capability keys from provider.yaml
-  ansible.builtin.replace:
-    path: ~/provider/provider.yaml
-    regexp: '^\s*- key: (feat-persistent-storage|capabilities/storage/1/class|capabilities/storage/1/persistent)\n\s*value: .*$'
-    replace: ''
-  vars:
-    ansible_python_interpreter: /usr/bin/python3  # ensure consistent behavior if needed
+- name: Create /root/provider directory for provider configuration
+  ansible.builtin.file:
+    path: /root/provider
+    state: directory
+    mode: '0755'
 
 - name: Extract storage class name from rook-ceph-cluster.values.yml
   ansible.builtin.set_fact:
@@ -50,15 +48,6 @@
         | map(attribute='storageClass.name')
         | list | first }}
 
-- name: Append updated capability entries to provider.yaml
-  ansible.builtin.blockinfile:
-    path: ~/provider/provider.yaml
-    block: |
-      - key: feat-persistent-storage
-        value: true
-      - key: capabilities/storage/1/class
-        value: {{ storage_class_name }}
-      - key: capabilities/storage/1/persistent
-        value: true
-    marker: "# {mark} akash-capabilities"
-    insertafter: EOF
+- name: Display storage class configuration
+  ansible.builtin.debug:
+    msg: "Rook-Ceph storage class '{{ storage_class_name }}' is configured and will be detected by provider role"

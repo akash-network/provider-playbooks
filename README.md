@@ -79,6 +79,16 @@ The setup script will guide you through selecting which playbooks to run:
 - **Tailscale**: VPN setup for secure remote access
 - **Rook-Ceph**: Storage operator installation and configuration
 
+### Tailscale + Kubernetes Integration
+
+When both Tailscale and Kubernetes are selected:
+1. The script automatically installs Tailscale on all nodes first
+2. Retrieves the Tailscale IP address from the control plane node
+3. Adds the Tailscale IP to the Kubernetes API server TLS certificate as a Subject Alternative Name (SAN)
+4. This allows secure access to the Kubernetes API through your Tailscale network
+
+This integration is automatic and requires no additional configuration.
+
 ## Manual Execution
 
 If you need to run playbooks manually:

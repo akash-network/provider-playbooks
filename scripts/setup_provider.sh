@@ -191,10 +191,12 @@ select_playbooks() {
                 echo -n -e "${BLUE}[?]${NC} Please type the location where the storage is mounted (e.g., /data): "
                 read -r response
                 containerd_dir_path="$response/containerd"
+                kubelet_dir_path="$response/kubelet"
                 k3s_data_dir="$response/rancher/k3s"
                 ;;
             n)
                 containerd_dir_path="/var/lib/containerd"
+                kubelet_dir_path="/var/lib/kubelet"
                 k3s_data_dir="/var/lib/rancher/k3s"
                 ;;
             * ) echo "Please answer y or n.";;
@@ -217,8 +219,26 @@ select_playbooks() {
         echo -n -e "${BLUE}[?]${NC} Are there GPU nodes in the cluster? (Will install NVIDIA drivers and container toolkit) [y/n]: "
         read -r response
         case $response in
-            [Yy]* ) SELECTED_GPU=true; break;;
-            [Nn]* ) SELECTED_GPU=false; break;;
+            [Yy]* ) 
+                SELECTED_GPU=true
+                # Ask about GPU type
+                echo
+                echo -e "${YELLOW}GPU Type Selection:${NC}"
+                echo -e "${BLUE}[1]${NC} Consumer GPUs (RTX 4090, RTX 5090, etc.)"
+                echo -e "${BLUE}[2]${NC} Data Center GPUs (H100, H200, A100, etc.)"
+                echo
+                while true; do
+                    echo -n -e "${BLUE}[?]${NC} Select GPU type (1/2) [1]: "
+                    read -r gpu_type_response
+                    case $gpu_type_response in
+                        1|"") GPU_TYPE="consumer"; break;;
+                        2) GPU_TYPE="datacenter"; break;;
+                        * ) echo "Please answer 1 or 2.";;
+                    esac
+                done
+                break
+                ;;
+            [Nn]* ) SELECTED_GPU=false; GPU_TYPE=""; break;;
             * ) echo "Please answer y or n.";;
         esac
     done
@@ -270,7 +290,15 @@ select_playbooks() {
         print_menu_item "✗" "Kubernetes - ${KUBERNETES_DESC}"
     fi
     if $SELECTED_OS; then print_menu_item "✓" "OS - ${OS_DESC}"; else print_menu_item "✗" "OS - ${OS_DESC}"; fi
-    if $SELECTED_GPU; then print_menu_item "✓" "GPU - ${GPU_DESC}"; else print_menu_item "✗" "GPU - ${GPU_DESC}"; fi
+    if $SELECTED_GPU; then 
+        if [ "$GPU_TYPE" = "datacenter" ]; then
+            print_menu_item "✓" "GPU - Data Center GPUs (H100, H200, A100, etc.)"
+        else
+            print_menu_item "✓" "GPU - Consumer GPUs (RTX 4090, 5090, etc.)"
+        fi
+    else 
+        print_menu_item "✗" "GPU - ${GPU_DESC}"
+    fi
     if $SELECTED_PROVIDER; then print_menu_item "✓" "Provider - ${PROVIDER_DESC}"; else print_menu_item "✗" "Provider - ${PROVIDER_DESC}"; fi
     if $SELECTED_TAILSCALE; then print_menu_item "✓" "Tailscale - ${TAILSCALE_DESC}"; else print_menu_item "✗" "Tailscale - ${TAILSCALE_DESC}"; fi
     if $SELECTED_ROOK_CEPH; then print_menu_item "✓" "Rook-Ceph - ${ROOK_CEPH_DESC}"; else print_menu_item "✗" "Rook-Ceph - ${ROOK_CEPH_DESC}"; fi
@@ -894,6 +922,7 @@ print_status "Gathering configuration information..."
 # Set default values for storage (will be overridden if user selected custom path earlier)
 # These defaults are only used if Kubernetes was not selected
 containerd_dir_path="${containerd_dir_path:-/var/lib/containerd}"
+kubelet_dir_path="${kubelet_dir_path:-/var/lib/kubelet}"
 k3s_data_dir="${k3s_data_dir:-/var/lib/rancher/k3s}"
 
 # Configure Container Storage
@@ -1053,23 +1082,7 @@ if [ "$USE_EXISTING_HOSTS" = false ]; then
             # Create Rook-Ceph defaults file
             mkdir -p ~/provider-playbooks/roles/rook-ceph/defaults
 
-            # Create CSI driver directories
-            print_status "Creating CSI driver directories..."
-            for node in "${storage_nodes[@]}"; do
-                # Extract node number from the node name (e.g., "node1" -> "1")
-                node_num=${node#node}
-                # Get node info from the nodes array (subtract 1 because array is 0-based)
-                node_info=${nodes[$((node_num-1))]}
-                node_ip=$(echo "$node_info" | cut -d'|' -f1)
-                node_user=$(echo "$node_info" | cut -d'|' -f2)
-                node_port=$(echo "$node_info" | cut -d'|' -f3)
-                
-                # Create the necessary directories for CSI driver
-                ssh -o StrictHostKeyChecking=no -p ${node_port} ${node_user}@${node_ip} "mkdir -p $kubelet_dir_path/plugins $kubelet_dir_path/pods $kubelet_dir_path/plugins_registry"
-                
-                # Ensure proper permissions
-                ssh -o StrictHostKeyChecking=no -p ${node_port} ${node_user}@${node_ip} "chmod 755 $kubelet_dir_path $kubelet_dir_path/plugins $kubelet_dir_path/pods $kubelet_dir_path/plugins_registry"
-            done
+            # Note: CSI driver directories will be created after SSH key setup is complete
 
             # Determine MON and MGR counts based on number of storage nodes
             if [ ${#storage_nodes[@]} -eq 1 ]; then
@@ -1116,7 +1129,7 @@ if [ "$USE_EXISTING_HOSTS" = false ]; then
 
             cat > ~/provider-playbooks/roles/rook-ceph/defaults/main.yaml << EOF
 rook_ceph_namespace: rook-ceph
-rook_ceph_version: "1.16.6"
+rook_ceph_version: "1.18.7"
 
 # Ceph cluster configuration
 pool_size: $pool_size
@@ -1473,6 +1486,31 @@ for i in "${!nodes[@]}"; do
     fi
 done
 
+# Create CSI driver directories for Rook-Ceph if selected (after SSH keys are verified)
+if $SELECTED_ROOK_CEPH && [ -n "${storage_nodes:-}" ]; then
+    print_status "Creating CSI driver directories on storage nodes..."
+    for node in "${storage_nodes[@]}"; do
+        # Extract node number from the node name (e.g., "node1" -> "1")
+        node_num=${node#node}
+        # Get node info from the nodes array (subtract 1 because array is 0-based)
+        node_info=${nodes[$((node_num-1))]}
+        node_ip=$(echo "$node_info" | cut -d'|' -f1)
+        node_user=$(echo "$node_info" | cut -d'|' -f2)
+        node_port=$(echo "$node_info" | cut -d'|' -f3)
+        
+        print_status "Creating directories on ${node} (${node_ip})..."
+        # Create the necessary directories for CSI driver
+        if ssh -o StrictHostKeyChecking=no -p ${node_port} ${node_user}@${node_ip} "mkdir -p $kubelet_dir_path/plugins $kubelet_dir_path/pods $kubelet_dir_path/plugins_registry"; then
+            # Ensure proper permissions
+            ssh -o StrictHostKeyChecking=no -p ${node_port} ${node_user}@${node_ip} "chmod 755 $kubelet_dir_path $kubelet_dir_path/plugins $kubelet_dir_path/pods $kubelet_dir_path/plugins_registry"
+            print_status "CSI directories created successfully on ${node}"
+        else
+            print_error "Failed to create CSI directories on ${node}"
+            exit 1
+        fi
+    done
+fi
+
 # Clone provider-playbooks if not exists
 print_status "Created new cluster.yml configuration"
 
@@ -1615,6 +1653,45 @@ print_status "Hosts configuration verified"
 # Run the playbook
 print_status "Running playbooks based on your selections..."
 
+# Initialize TLS SAN variable
+TAILSCALE_TLS_SAN=""
+
+# If both Tailscale and Kubernetes are selected, install Tailscale first to get the IP for TLS SAN
+if $SELECTED_TAILSCALE && $SELECTED_KUBERNETES; then
+    print_status "Installing Tailscale on all nodes first to configure TLS SAN for Kubernetes API server..."
+    
+    # Ensure we're in the provider-playbooks directory
+    cd ~/provider-playbooks
+    
+    # Activate the virtual environment
+    source ~/kubespray/venv/bin/activate
+    
+    # Run Tailscale playbook on all nodes
+    print_status "Running Tailscale playbook on all nodes..."
+    ansible-playbook -i ~/kubespray/inventory/akash/inventory.ini playbooks.yml -t tailscale -v
+    
+    # Get the Tailscale IP from the first control plane node
+    print_status "Retrieving Tailscale IP address from control plane node..."
+    NODE_IP=$(grep "^node1 " ~/kubespray/inventory/akash/inventory.ini | awk '{for(i=1;i<=NF;i++) if($i ~ /^ansible_host=/) print $i}' | cut -d'=' -f2)
+    NODE_USER=$(grep "^node1 " ~/kubespray/inventory/akash/inventory.ini | awk '{for(i=1;i<=NF;i++) if($i ~ /^ansible_user=/) print $i}' | cut -d'=' -f2)
+    NODE_PORT=$(grep "^node1 " ~/kubespray/inventory/akash/inventory.ini | awk '{for(i=1;i<=NF;i++) if($i ~ /^ansible_port=/) print $i}' | cut -d'=' -f2)
+    
+    # Default to root if not specified
+    NODE_USER=${NODE_USER:-root}
+    NODE_PORT=${NODE_PORT:-22}
+    
+    # Get Tailscale IP from control plane node
+    TAILSCALE_TLS_SAN=$(ssh -o StrictHostKeyChecking=no -p ${NODE_PORT} ${NODE_USER}@${NODE_IP} "tailscale ip -4" 2>/dev/null | tr -d '\n')
+    
+    if [ -n "$TAILSCALE_TLS_SAN" ] && validate_ip "$TAILSCALE_TLS_SAN"; then
+        print_status "Tailscale IP retrieved from control plane: ${TAILSCALE_TLS_SAN}"
+        print_status "This IP will be added to the Kubernetes API server TLS certificate"
+    else
+        print_warning "Failed to retrieve Tailscale IP. TLS SAN will use default configuration."
+        TAILSCALE_TLS_SAN=""
+    fi
+fi
+
 # Run Kubernetes installation if selected
 if $SELECTED_KUBERNETES; then
   if $SELECTED_KUBESPRAY; then
@@ -1637,11 +1714,33 @@ containerd_storage_dir: "${containerd_dir_path}"
 containerd_sandbox_image: "registry.k8s.io/pause:3.10"
 EOF
 
-    cat > "${INVENTORY_DIR}/group_vars/k8s_cluster/k8s-cluster.yml" <<EOF
+    # Add TLS SAN configuration if Tailscale IP is available
+    if [ -n "$TAILSCALE_TLS_SAN" ]; then
+        cat > "${INVENTORY_DIR}/group_vars/k8s_cluster/k8s-cluster.yml" <<EOF
 containerd_storage_dir: "${containerd_dir_path}"
-EOF
 
-    print_status "Set containerd_storage_dir to ${containerd_dir_path}"
+# Kubelet custom flags for ephemeral storage
+kubelet_custom_flags:
+  - "--root-dir=${kubelet_dir_path}"
+
+# Additional TLS SANs for API server certificate
+supplementary_addresses_in_ssl_keys:
+  - ${TAILSCALE_TLS_SAN}
+EOF
+        print_status "Set containerd_storage_dir to ${containerd_dir_path}"
+        print_status "Set kubelet --root-dir to ${kubelet_dir_path}"
+        print_status "Added Tailscale IP (${TAILSCALE_TLS_SAN}) to API server TLS certificate SANs"
+    else
+        cat > "${INVENTORY_DIR}/group_vars/k8s_cluster/k8s-cluster.yml" <<EOF
+containerd_storage_dir: "${containerd_dir_path}"
+
+# Kubelet custom flags for ephemeral storage
+kubelet_custom_flags:
+  - "--root-dir=${kubelet_dir_path}"
+EOF
+        print_status "Set containerd_storage_dir to ${containerd_dir_path}"
+        print_status "Set kubelet --root-dir to ${kubelet_dir_path}"
+    fi
 
     # 3. Run Kubespray
     cd "${KUBESPRAY_DIR}"
@@ -1659,8 +1758,14 @@ EOF
     # Simply force append the variable to each file
     for i in $(seq 1 $(grep -c "^node[0-9]* " ~/kubespray/inventory/akash/inventory.ini)); do
         NODE_NAME="node$i"
-        echo -e "\n# K3s specific variables\ninternal_ip: \"$NODE_IP\"\nk3s_data_dir: \"$k3s_data_dir\"" >> ~/provider-playbooks/host_vars/${NODE_NAME}.yml
-        print_status "Added internal_ip and k3s_data_dir to host_vars file for $NODE_NAME"
+        # Add K3s specific variables including TLS SAN if Tailscale IP is available
+        if [ -n "$TAILSCALE_TLS_SAN" ]; then
+            echo -e "\n# K3s specific variables\ninternal_ip: \"$NODE_IP\"\nk3s_data_dir: \"$k3s_data_dir\"\ntls_san: \"$TAILSCALE_TLS_SAN\"" >> ~/provider-playbooks/host_vars/${NODE_NAME}.yml
+            print_status "Added internal_ip, k3s_data_dir, and tls_san (${TAILSCALE_TLS_SAN}) to host_vars file for $NODE_NAME"
+        else
+            echo -e "\n# K3s specific variables\ninternal_ip: \"$NODE_IP\"\nk3s_data_dir: \"$k3s_data_dir\"" >> ~/provider-playbooks/host_vars/${NODE_NAME}.yml
+            print_status "Added internal_ip and k3s_data_dir to host_vars file for $NODE_NAME"
+        fi
     done
     
     ansible-playbook -i ~/kubespray/inventory/akash/inventory.ini playbooks.yml -t k3s -v --extra-vars "k3s_data_dir=${k3s_data_dir}"
@@ -1755,7 +1860,20 @@ if $SELECTED_OS || $SELECTED_GPU || $SELECTED_PROVIDER || $SELECTED_TAILSCALE ||
     # Run GPU playbook if selected
     if $SELECTED_GPU; then
         print_status "Running GPU configuration playbook..."
-        ansible-playbook -i ~/kubespray/inventory/akash/inventory.ini playbooks.yml -t gpu -v
+        print_status "GPU Type: ${GPU_TYPE}"
+        ansible-playbook -i ~/kubespray/inventory/akash/inventory.ini playbooks.yml -t gpu -v --extra-vars "nvidia_driver_type=${GPU_TYPE}"
+    fi
+    
+    # Run Rook-Ceph playbook if selected (must run before Provider to create /root/provider directory)
+    if $SELECTED_ROOK_CEPH; then
+        print_status "Running Rook-Ceph playbook..."
+        # Determine the base path for rook data directory
+        if [[ "$kubelet_dir_path" == /data/* ]]; then
+            rook_data_dir="/data/rook"
+        else
+            rook_data_dir="/var/lib/rook"
+        fi
+        ansible-playbook -i ~/kubespray/inventory/akash/inventory.ini playbooks.yml -t rook-ceph -v --extra-vars "rook_ceph_data_dir=${rook_data_dir}" --extra-vars "kubelet_dir_path=${kubelet_dir_path}"
     fi
     
     # Run Provider playbook if selected
@@ -1764,16 +1882,16 @@ if $SELECTED_OS || $SELECTED_GPU || $SELECTED_PROVIDER || $SELECTED_TAILSCALE ||
         ansible-playbook -i ~/kubespray/inventory/akash/inventory.ini playbooks.yml -t provider -v
     fi
     
-    # Run Tailscale playbook if selected
+    # Run Tailscale playbook if selected (skip if already installed with Kubernetes)
     if $SELECTED_TAILSCALE; then
-        print_status "Running Tailscale playbook..."
-        ansible-playbook -i ~/kubespray/inventory/akash/inventory.ini playbooks.yml -t tailscale -v
-    fi
-
-    # Run Rook-Ceph playbook if selected
-    if $SELECTED_ROOK_CEPH; then
-        print_status "Running Rook-Ceph playbook..."
-        ansible-playbook -i ~/kubespray/inventory/akash/inventory.ini playbooks.yml -t rook-ceph -v --extra-vars "rook_ceph_data_dir=${ephemeral_dir_path}/rook" --extra-vars "kubelet_dir_path=${kubelet_dir_path}"
+        if [ -n "$TAILSCALE_TLS_SAN" ]; then
+            # Tailscale was already installed on all nodes for TLS SAN configuration
+            print_status "Tailscale already installed on all nodes"
+        else
+            # Tailscale wasn't installed yet (Kubernetes wasn't selected), install on all nodes
+            print_status "Running Tailscale playbook..."
+            ansible-playbook -i ~/kubespray/inventory/akash/inventory.ini playbooks.yml -t tailscale -v
+        fi
     fi
 else
     print_status "No provider playbooks were selected to run"

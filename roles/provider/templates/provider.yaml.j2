@@ -20,6 +20,26 @@ attributes:
   - key: cuda-version
     value: "{{ cuda_version }}"
 {% endif %}
+{% if has_persistent_storage | default(false) and storage_class_name is defined %}
+  - key: capabilities/storage/1/class
+    value: "{{ storage_class_name }}"
+  - key: capabilities/storage/1/persistent
+    value: "true"
+{% endif %}
+{% if has_gpu | default(false) and gpu_model_name is defined %}
+  - key: capabilities/gpu/vendor/nvidia/model/{{ gpu_model_name }}
+    value: "true"
+  - key: capabilities/gpu/vendor/nvidia/model/{{ gpu_model_name }}/ram/{{ gpu_memory_gi }}
+    value: "true"
+  - key: capabilities/gpu/vendor/nvidia/model/{{ gpu_model_name }}/interface/{{ gpu_interface }}
+    value: "true"
+  - key: capabilities/gpu/vendor/nvidia/model/{{ gpu_model_name }}/interface/{{ gpu_interface }}/ram/{{ gpu_memory_gi }}
+    value: "true"
+  - key: capabilities/storage/2/class
+    value: ram
+  - key: capabilities/storage/2/persistent
+    value: "false"
+{% endif %}
 {% if country is defined and country %}
   - key: country
     value: "{{ country }}"

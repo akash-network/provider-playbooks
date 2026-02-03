@@ -9,6 +9,9 @@
 - name: Detect GPU and CUDA information
   ansible.builtin.import_tasks: gpu_detect.yml
 
+- name: Detect available capabilities (storage, GPU, etc.)
+  ansible.builtin.import_tasks: detect_capabilities.yml
+
 - name: Initialize the Akash charts
   ansible.builtin.import_tasks: install.yml
 
