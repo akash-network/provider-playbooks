@@ -2,4 +2,7 @@
 # defaults file for GPU
 install_dir: "/root/ansible.tmp/"
 nvidia_version: 580.95.05
+nvidia_driver_type: "consumer"  # Options: "consumer" (RTX 4090, 5090, etc.) or "datacenter" (H100, H200, etc.)
 cruntime_toml_path: '/etc/nvidia-container-runtime/config.toml'
+ubuntu_version: "2404"  # Ubuntu 24.04
+nvdp_version: "0.18.0"  # NVIDIA Device Plugin version

@@ -24,8 +24,6 @@ cephClusterSpec:
 {% set nodes = storage_nodes | replace('[', '') | replace(']', '') | replace("'", '') | trim() %}
 {% for node in nodes.split() %}
     - name: "{{ node }}"
-      config:
-        storeType: "{{ 'bluestore' if device_type == 'ssd' or device_type == 'nvme' else 'filestore' }}"
 {% endfor %}
 cephBlockPools:
   - name: akash-deployments

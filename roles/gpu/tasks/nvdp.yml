@@ -55,7 +55,7 @@
           allow-nvdp: "true"
           nvidia.com/gpu.present: "true"
   delegate_to: node1
-  run_once: true
+  when: has_gpu
 
 - name: Add NVIDIA Device Plugin Helm repository
   kubernetes.core.helm_repository:
@@ -70,62 +70,87 @@
   delegate_to: node1
   run_once: true
 
-- name: Check for required GPU node labels
+- name: Check for required GPU node labels on all GPU nodes
   ansible.builtin.shell: >
-    kubectl get node {{ inventory_hostname }} -o json | jq -r '
-    {
-      "name": .metadata.name,
-      "has_allow_nvdp": (.metadata.labels."allow-nvdp" == "true"),
-    } | tostring'
-  register: node_labels_check
+    kubectl get nodes -l allow-nvdp=true -o json | jq -r '.items | length'
+  register: labeled_gpu_nodes_count
   changed_when: false
   delegate_to: node1
   run_once: true
 
-- name: Parse node label results
-  ansible.builtin.set_fact:
-    parsed_node_labels: "{{ [node_labels_check.stdout | from_json] }}"
+- name: Get total GPU nodes count
+  ansible.builtin.shell: >
+    kubectl get nodes -l nvidia.com/gpu.present=true -o json | jq -r '.items | length'
+  register: total_gpu_nodes_count
+  changed_when: false
   delegate_to: node1
   run_once: true
 
-- name: Display nodes missing required labels
+- name: Get list of labeled GPU nodes
+  ansible.builtin.shell: >
+    kubectl get nodes -l allow-nvdp=true -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}'
+  register: labeled_nodes_list
+  changed_when: false
+  delegate_to: node1
+  run_once: true
+
+- name: Display GPU node labeling status
   ansible.builtin.debug:
-    msg: "Node {{ item.name }} missing labels: {{
-      (item.has_allow_nvdp == false) | ternary('allow-nvdp=true ', '') }}"
-  loop: "{{ parsed_node_labels }}"
-  when: not (item.has_allow_nvdp)
+    msg: |
+      GPU Node Labeling Status:
+      - Total GPU nodes: {{ total_gpu_nodes_count.stdout }}
+      - Labeled nodes: {{ labeled_gpu_nodes_count.stdout }}
+      - Nodes with allow-nvdp=true:
+      {{ labeled_nodes_list.stdout_lines | join('\n      ') if labeled_nodes_list.stdout_lines | length > 0 else '      None' }}
   delegate_to: node1
   run_once: true
 
-- name: Fail if required labels are missing
-  ansible.builtin.fail:
-    msg: "Node {{ item.name }} is missing required labels: {{
-      (item.has_allow_nvdp == false) | ternary('allow-nvdp=true ', '') }}"
-  loop: "{{ parsed_node_labels }}"
-  when: not (item.has_allow_nvdp)
-  delegate_to: node1
-  run_once: true
-
-- name: Check if any node has all required labels
+- name: Set labels_ready flag
   ansible.builtin.set_fact:
-    labels_ready: "{{ labels_ready | default(false) or (item.has_allow_nvdp) }}"
-  loop: "{{ parsed_node_labels }}"
+    labels_ready: "{{ (labeled_gpu_nodes_count.stdout | int) > 0 }}"
   delegate_to: node1
   run_once: true
 
-- name: Install NVIDIA Device Plugin
+- name: Verify all GPU nodes are labeled
+  ansible.builtin.fail:
+    msg: "Not all GPU nodes are labeled! Expected {{ total_gpu_nodes_count.stdout }} but only {{ labeled_gpu_nodes_count.stdout }} nodes have allow-nvdp=true"
+  when: labeled_gpu_nodes_count.stdout != total_gpu_nodes_count.stdout
+  delegate_to: node1
+  run_once: true
+
+- name: Install NVIDIA Device Plugin with CDI
   kubernetes.core.helm:
     name: nvdp
     chart_ref: nvdp/nvidia-device-plugin
     release_namespace: nvidia-device-plugin
     create_namespace: true
-    chart_version: 0.17.1
+    chart_version: "{{ nvdp_version }}"
     values:
       runtimeClassName: nvidia
-      deviceListStrategy: volume-mounts
+      deviceListStrategy: cdi-cri
+      nvidiaDriverRoot: "/"
       nodeSelector:
         allow-nvdp: "true"
     state: present
   when: labels_ready | bool
   delegate_to: node1
   run_once: true
+
+- name: Wait for NVIDIA Device Plugin pods to be ready
+  ansible.builtin.command: kubectl -n nvidia-device-plugin wait --for=condition=ready pod -l app.kubernetes.io/instance=nvdp --timeout=300s
+  delegate_to: node1
+  run_once: true
+  register: nvdp_wait
+  changed_when: false
+  failed_when: false
+
+- name: Get NVIDIA Device Plugin logs
+  ansible.builtin.command: kubectl -n nvidia-device-plugin logs -l app.kubernetes.io/instance=nvdp --tail=50
+  delegate_to: node1
+  run_once: true
+  register: nvdp_logs
+  changed_when: false
+
+- name: Display NVIDIA Device Plugin logs
+  ansible.builtin.debug:
+    msg: "{{ nvdp_logs.stdout_lines }}"

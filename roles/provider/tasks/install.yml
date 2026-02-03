@@ -17,18 +17,44 @@
       labels:
         akash.network: 'true'
 
-- name: Install Akash Helm charts
+- name: Install Akash hostname-operator
   kubernetes.core.helm:
-    name: "{{ item.name }}"
-    chart_ref: "akash/{{ item.chart }}"
+    name: akash-hostname-operator
+    chart_ref: akash/akash-hostname-operator
     release_namespace: akash-services
-  loop:
-    - name: akash-hostname-operator
-      chart: akash-hostname-operator
-    - name: inventory-operator
-      chart: akash-inventory-operator
-    - name: akash-node
-      chart: akash-node
+
+- name: Build inventory operator storage classes list
+  ansible.builtin.set_fact:
+    inventory_storage_classes: "{{ ['default'] }}"
+
+- name: Add persistent storage class to inventory operator
+  ansible.builtin.set_fact:
+    inventory_storage_classes: "{{ inventory_storage_classes + [storage_class_name] }}"
+  when: has_persistent_storage | default(false)
+
+- name: Add RAM storage class for GPU workloads
+  ansible.builtin.set_fact:
+    inventory_storage_classes: "{{ inventory_storage_classes + ['ram'] }}"
+  when: has_gpu | default(false)
+
+- name: Display inventory operator storage configuration
+  ansible.builtin.debug:
+    msg: "Inventory operator will be configured with storage classes: {{ inventory_storage_classes | join(', ') }}"
+
+- name: Install Akash inventory-operator with storage classes
+  kubernetes.core.helm:
+    name: inventory-operator
+    chart_ref: akash/akash-inventory-operator
+    release_namespace: akash-services
+    values:
+      inventoryConfig:
+        cluster_storage: "{{ inventory_storage_classes }}"
+
+- name: Install Akash node
+  kubernetes.core.helm:
+    name: akash-node
+    chart_ref: akash/akash-node
+    release_namespace: akash-services
 
 - name: Apply Akash CRD from URL
   kubernetes.core.k8s:
