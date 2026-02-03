@@ -1,5 +1,5 @@
 rook_ceph_namespace: rook-ceph
-rook_ceph_version: "1.16.6"
+rook_ceph_version: "1.18.7"
 
 # Ceph cluster configuration
 pool_size: 3
@@ -14,11 +14,17 @@ osds_per_device: 1
 failure_domain: "host"
 storage_class: "beta2"
 zfs_for_ephemeral: "false"
-# Kubelet directory path
-# This must match the kubelet's --root-dir configuration
-# Leave empty to use k3s default (/var/lib/kubelet)
+
+# Directory paths
+# Kubelet directory path - must match kubelet's --root-dir configuration
+# Leave empty to use default (/var/lib/kubelet)
 # Set to /data/kubelet if using custom kubelet root dir
 kubelet_dir_path: ""
+
+# Ceph data directory path - where Ceph monitor and manager data is stored
+# Default: /var/lib/rook
+# If using custom mount (e.g., /data), set to /data/rook
+rook_ceph_data_dir: "/var/lib/rook"
 
 # Node configuration (will be set by setup_provider.sh)
 storage_nodes: []

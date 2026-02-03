@@ -1,11 +1,70 @@
-This ansible role covers the steps required to get the AKash Provider up and runnning.
+This ansible role covers the steps required to get the AKash Provider up and running.
+
+## Automatic Capability Detection
+
+This role **automatically detects and configures** your provider's capabilities:
+
+### GPU Detection
+- Detects NVIDIA GPUs using `nvidia-smi`
+- Extracts model name, memory, and interface type (PCIe/SXM)
+- Automatically adds GPU attributes in the new Akash format:
+  - `capabilities/gpu/vendor/nvidia/model/<model>`
+  - `capabilities/gpu/vendor/nvidia/model/<model>/ram/<ram>`
+  - `capabilities/gpu/vendor/nvidia/model/<model>/interface/<interface>`
+  - `capabilities/gpu/vendor/nvidia/model/<model>/interface/<interface>/ram/<ram>`
+- Also includes `cuda-version` attribute
+- **Automatically adds SHM (Shared Memory) support** for GPU workloads:
+  - `capabilities/storage/2/class: ram`
+  - `capabilities/storage/2/persistent: false`
+- Configures inventory-operator with RAM storage class
+
+### Persistent Storage Detection
+- Detects Rook-Ceph storage classes labeled with `akash.network=true`
+- Automatically adds storage attributes:
+  - `capabilities/storage/1/class` (beta1/beta2/beta3)
+  - `capabilities/storage/1/persistent: true`
+
+### Example Auto-Generated Attributes
+
+For a provider with RTX 4090 GPUs and beta3 (NVMe) storage:
+```yaml
+attributes:
+  - key: capabilities/gpu/vendor/nvidia/model/rtx4090
+    value: "true"
+  - key: capabilities/gpu/vendor/nvidia/model/rtx4090/ram/24Gi
+    value: "true"
+  - key: capabilities/gpu/vendor/nvidia/model/rtx4090/interface/pcie
+    value: "true"
+  - key: capabilities/gpu/vendor/nvidia/model/rtx4090/interface/pcie/ram/24Gi
+    value: "true"
+  - key: capabilities/storage/1/class
+    value: beta3
+  - key: capabilities/storage/1/persistent
+    value: "true"
+  - key: capabilities/storage/2/class
+    value: ram
+  - key: capabilities/storage/2/persistent
+    value: "false"
+  - key: cuda-version
+    value: "12.6"
+```
+
+**Inventory Operator Configuration:**
+```bash
+# Automatically configured with:
+# - default (local-path)
+# - beta3 (persistent storage from Rook-Ceph)
+# - ram (SHM for GPU workloads)
+```
 
 ### Prerequisites
 - Ensure to run the OP role to fetch the base64 key and key secret
     - Alternatively you could pass the `provider_b64_key` and `provider_b64_keysecret` using Extra vars
 - Kubectl binary
 - Access to Kubernetes Cluster
-- Helm binary    
+- Helm binary
+- (Optional) GPU nodes with NVIDIA drivers installed
+- (Optional) Rook-Ceph persistent storage configured    
 
 ### Install the requirements
 We need to install the Kubernetes core module specified in the requirements.yml file

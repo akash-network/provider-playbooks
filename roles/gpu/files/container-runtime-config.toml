@@ -1,5 +1,5 @@
-accept-nvidia-visible-devices-as-volume-mounts = true
-accept-nvidia-visible-devices-envvar-when-unprivileged = false
+accept-nvidia-visible-devices-as-volume-mounts = false
+accept-nvidia-visible-devices-envvar-when-unprivileged = true
 disable-require = false
 supported-driver-capabilities = "compat32,compute,display,graphics,ngx,utility,video"
 #swarm-resource = "DOCKER_RESOURCE_GPU"

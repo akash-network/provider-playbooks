@@ -1,7 +1,13 @@
+- name: Create rook-ceph directory
+  ansible.builtin.file:
+    path: /root/rook-ceph
+    state: directory
+    mode: '0755'
+
 - name: Copy rook-ceph values file to remote host
   template:
     src: "rook-ceph-cluster.values.yml.j2"
-    dest: "/root/provider/rook-ceph-cluster.values.yml"
+    dest: "/root/rook-ceph/rook-ceph-cluster.values.yml"
 
 - name: Install Rook-Ceph Cluster via Helm
   kubernetes.core.helm:
@@ -10,5 +16,5 @@
     release_namespace: "{{ rook_ceph_namespace }}"
     chart_version: "{{ rook_ceph_version }}"
     values_files:
-      - /root/provider/rook-ceph-cluster.values.yml
+      - /root/rook-ceph/rook-ceph-cluster.values.yml
     state: present

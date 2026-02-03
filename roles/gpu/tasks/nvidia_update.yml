@@ -71,22 +71,27 @@
     state: present
     keyring: /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
 
-- name: Download CUDA key
+- name: Create keyrings directory
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    mode: '0755'
+
+- name: Download CUDA GPG key
   ansible.builtin.get_url:
-    url: https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/3bf863cc.pub
+    url: https://developer.download.nvidia.com/compute/cuda/repos/ubuntu{{ ubuntu_version }}/x86_64/3bf863cc.pub
     dest: /tmp/cuda-key.pub
     mode: '0644'
 
 - name: Add CUDA key to keyring
   ansible.builtin.shell: |
-    mkdir -p /usr/share/keyrings
-    gpg --dearmor -o /usr/share/keyrings/cuda-keyring.gpg /tmp/cuda-key.pub
+    gpg --dearmor -o /etc/apt/keyrings/nvidia-cuda.gpg /tmp/cuda-key.pub
   args:
-    creates: /usr/share/keyrings/cuda-keyring.gpg
+    creates: /etc/apt/keyrings/nvidia-cuda.gpg
 
 - name: Add NVIDIA CUDA repository
   ansible.builtin.apt_repository:
-    repo: "deb [signed-by=/usr/share/keyrings/cuda-keyring.gpg] https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64 /"
+    repo: "deb [signed-by=/etc/apt/keyrings/nvidia-cuda.gpg] https://developer.download.nvidia.com/compute/cuda/repos/ubuntu{{ ubuntu_version }}/x86_64/ /"
     state: present
     filename: cuda-repo
     update_cache: yes
@@ -95,7 +100,7 @@
   ansible.builtin.apt:
     update_cache: yes
 
-- name: Install NVIDIA driver
+- name: Install NVIDIA driver (consumer GPUs)
   ansible.builtin.apt:
     name: "nvidia-driver-{{ nvidia_major_version }}"
     state: present
@@ -103,33 +108,28 @@
     dpkg_options: 'force-confdef,force-confold'
   environment:
     DEBIAN_FRONTEND: noninteractive
+  when: nvidia_driver_type == "consumer"
 
-- name: Install NVIDIA CUDA toolkit
-  ansible.builtin.apt:
-    name: nvidia-cuda-toolkit
-    state: present
-    update_cache: yes
+- name: Install NVIDIA driver and Fabric Manager (data center GPUs)
+  block:
+    - name: Install NVIDIA server driver
+      ansible.builtin.apt:
+        name: "nvidia-driver-{{ nvidia_major_version }}-server"
+        state: present
+        update_cache: yes
+        dpkg_options: 'force-confdef,force-confold'
+      environment:
+        DEBIAN_FRONTEND: noninteractive
 
-- name: Check if NVIDIA GPUs are PCIe
-  ansible.builtin.shell: nvidia-smi -L
-  register: nvidia_smi_output
-  changed_when: false
+    - name: Install NVIDIA Fabric Manager
+      ansible.builtin.apt:
+        name: "nvidia-fabricmanager-{{ nvidia_major_version }}"
+        state: present
+        update_cache: yes
 
-- name: Fail if the Nvidia GPUs are not initialized
-  ansible.builtin.set_fact: 
-    has_passed: "{{ 'Failed to initialize' in nvidia_smi_output.stdout }}"
-
-- name: Set fact for PCIe GPUs
-  ansible.builtin.set_fact:
-    has_pcie: "{{ 'PCIe' in nvidia_smi_output.stdout }}"  
-
-- name: Install and configure NVIDIA Fabric Manager
-  ansible.builtin.apt:
-    name: "nvidia-fabricmanager-{{ nvidia_major_version }}"
-    state: present
-    update_cache: yes
-  when: 
-  - has_pcie is none
-  - has_passed
-  notify:
-    - Configure NVIDIA Fabric Manager
+    - name: Start NVIDIA Fabric Manager
+      ansible.builtin.systemd:
+        name: nvidia-fabricmanager
+        state: started
+        enabled: yes
+  when: nvidia_driver_type == "datacenter"

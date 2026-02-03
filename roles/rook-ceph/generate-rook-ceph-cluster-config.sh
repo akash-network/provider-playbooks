@@ -48,7 +48,7 @@ kubelet_dir_path=${kubelet_dir_path:-/var/lib/kubelet}
 # Write to rook-ceph-defaults.yml
 cat > rook-ceph-defaults.yml << EOF
 rook_ceph_namespace: rook-ceph
-rook_ceph_version: "1.16.6"
+rook_ceph_version: "1.18.7"
 
 ceph_cluster:
   storage_hosts:
