@@ -951,7 +951,7 @@ fi
 # Get provider domain name only if provider or tailscale is selected
 if $SELECTED_PROVIDER || $SELECTED_TAILSCALE; then
     print_status "Provider Domain Information:"
-    provider_name=$(get_input "Enter your provider domain name (e.g., example.com or test.example.com) Do not include "provider."" "" "[a-zA-Z0-9.-]+\.[a-zA-Z0-9.-]+")
+    provider_name=$(get_input "Enter your provider domain name (e.g., example.com or test.example.com) Do not include a "provider." prefix" "" "[a-zA-Z0-9.-]+\.[a-zA-Z0-9.-]+")
 else
     provider_name=""
 fi
