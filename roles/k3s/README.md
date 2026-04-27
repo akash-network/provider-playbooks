@@ -15,7 +15,7 @@ ansible-playbook -i inventory.yml playbook.yml -t k3s -e 'host=workers'
 #### Configuration Variables
 | Variable                  | Description                                    | Required | Default                 |
 |---------------------------|------------------------------------------------|----------|-------------------------|
-| `k3s_version_channel`     | Version of K3s to install                      | No       | v1.32.3+k3s1            |
+| `k3s_install_version`     | Exact K3s release (`INSTALL_K3S_VERSION`)      | No       | v1.35.3+k3s1            |
 | `k3s_cluster_cidr`        | Calico CIDR                                    | No       | 10.42.0.0/16            |
 | `disable_components`      | K3s components to disable                      | No       | traefik                 |
 | `k3s_flannel_backend`     | Flannel backend to use                         | No       | none                    |

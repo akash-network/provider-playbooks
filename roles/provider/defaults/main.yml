@@ -1,6 +1,14 @@
 ---
 helm_install_version: v3.17.3
 
+# Gateway API / NGINX Gateway Fabric (replaces ingress-nginx for provider edge)
+ngf_git_ref: v2.5.1
+cert_manager_chart_version: v1.19.1
+
+# ACME / Let's Encrypt — set by setup_provider.sh (host_vars) or override manually
+# acme_dns_provider: none | cloudflare | gcp
+acme_dns_provider: none
+
 # defaults file for provider
 node: "http://akash-node-1:26657"
 

@@ -1,0 +1,14 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: wildcard-https
+  namespace: akash-gateway
+spec:
+  secretName: wildcard-ingress-tls
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  commonName: "*.{{ domain }}"
+  dnsNames:
+    - "*.{{ domain }}"
+    - "*.ingress.{{ domain }}"

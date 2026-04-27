@@ -86,7 +86,7 @@
   ansible.builtin.command: >
     {% if is_first_master | bool  %}
     /bin/bash -c "curl -sfL https://get.k3s.io |
-    INSTALL_K3S_CHANNEL={{ k3s_version_channel }}
+    INSTALL_K3S_VERSION={{ k3s_install_version }}
     INSTALL_K3S_EXEC='server {{ k3s_common_args }}
     {{ cluster_init }}
     --node-ip={{ hostvars[inventory_hostname].internal_ip }}
@@ -97,7 +97,7 @@
     {{ scheduler_config }}' sh -"
     {% else %}
     /bin/bash -c "curl -sfL https://get.k3s.io |
-    INSTALL_K3S_CHANNEL={{ latestk3s | default(false) | ternary('latest', k3s_version_channel) }}
+    INSTALL_K3S_VERSION={{ k3s_install_version }}
     INSTALL_K3S_EXEC='server {{ k3s_common_args }}
     --node-ip={{ internal_ip }}
     --node-name={{ inventory_hostname }}

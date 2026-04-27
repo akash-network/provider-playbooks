@@ -29,7 +29,7 @@
     state: present
   loop:
     - { name: "akash", url: "https://akash-network.github.io/helm-charts" }
-    - { name: "ingress-nginx", url: "https://kubernetes.github.io/ingress-nginx" }
+    - { name: "jetstack", url: "https://charts.jetstack.io" }
 
 - name: Update Helm repositories
   ansible.builtin.command: helm repo update

@@ -3,7 +3,7 @@
 This repository contains Ansible playbooks for setting up and managing an Akash Provider node.
 - **GPU Support:** Installation of NVIDIA GPU drivers and runtime components.
 - **Networking:** Deployment of Tailscale via custom Ansible playbooks.
-- **Provider:** Deployment of Akash Provider.
+- **Provider:** Deployment of Akash Provider with **Gateway API** (NGINX Gateway Fabric), **cert-manager**, **`akash-gateway`**, and placeholder TLS (see `roles/provider/README.md` for production Let’s Encrypt and DNS).
 - **OS:** Sets up sysctl and cron jobs in the nodes.
 - **rook-ceph** Sets up persistent storage based on rook-ceph. See additional details in roles/rook-ceph/README.md
 

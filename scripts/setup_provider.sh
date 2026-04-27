@@ -405,7 +405,7 @@ setup_python_env() {
     # Clone Kubespray if not exists
     cd ~
     if [ ! -d "kubespray" ]; then
-        run_with_spinner "git clone -b v2.29.1 --depth=1 https://github.com/kubernetes-sigs/kubespray.git" "Cloning Kubespray repository version 2.28.0"
+        run_with_spinner "git clone -b v2.31.0 --depth=1 https://github.com/kubernetes-sigs/kubespray.git" "Cloning Kubespray repository v2.31.0"
     fi
     
     # Setup Python virtual environment
@@ -905,6 +905,129 @@ EOF
     fi
 }
 
+# Remove a prior ACME block from node1 host_vars (markers ## ACME START / ## ACME END)
+strip_acme_block_from_host_vars() {
+    local hv="/root/provider-playbooks/host_vars/node1.yml"
+    [ -f "$hv" ] || return 0
+    sed -i '/^## ACME START$/,/^## ACME END$/d' "$hv"
+}
+
+# Prompt for cert-manager DNS-01 credentials (Cloudflare or GCP) and append to host_vars
+collect_acme_tls_settings() {
+    local hv="/root/provider-playbooks/host_vars/node1.yml"
+    if [ ! -f "$hv" ]; then
+        print_warning "host_vars/node1.yml not found; skipping ACME prompts"
+        return 0
+    fi
+
+    print_status "Gateway TLS (Let's Encrypt via DNS-01)"
+    echo -e "${YELLOW}Choose how cert-manager should obtain the wildcard certificate for Akash Gateway:${NC}"
+    echo -e "  ${BLUE}1${NC} Cloudflare — API token with DNS edit on the zone used for ${provider_name}"
+    echo -e "  ${BLUE}2${NC} Google Cloud DNS — service account JSON with DNS admin rights"
+    echo -e "  ${BLUE}3${NC} Skip — use self-signed placeholder TLS (replace with Let's Encrypt later)"
+    echo
+    local acme_choice=""
+    while true; do
+        echo -n -e "${BLUE}[?]${NC} Select option (1/2/3) [3]: "
+        read -r acme_choice
+        case "${acme_choice:-3}" in
+            1) acme_choice=1; break;;
+            2) acme_choice=2; break;;
+            3|"") acme_choice=3; break;;
+            *) echo "Please enter 1, 2, or 3.";;
+        esac
+    done
+
+    strip_acme_block_from_host_vars
+
+    if [ "$acme_choice" = "3" ] || [ "$acme_choice" = "" ]; then
+        cat >> "$hv" << EOFACME
+
+## ACME START
+acme_dns_provider: none
+## ACME END
+EOFACME
+        print_status "ACME: using placeholder TLS (acme_dns_provider: none)"
+        chmod 600 "$hv" 2>/dev/null || true
+        return 0
+    fi
+
+    echo -n -e "${BLUE}[?]${NC} DNS zone name for ACME TXT records (usually apex, e.g. example.com) [${provider_name}]: "
+    read -r acme_dns_zone_in
+    local acme_dns_zone="${acme_dns_zone_in:-$provider_name}"
+
+    if [ "$acme_choice" = "1" ]; then
+        echo -e "${YELLOW}Create a Cloudflare API token with Zone.DNS:Edit and Zone.Zone:Read for this zone.${NC}"
+        echo -n -e "${BLUE}[?]${NC} Paste Cloudflare API token (input hidden): "
+        read -r -s cf_token
+        echo
+        if [ -z "$cf_token" ]; then
+            print_error "Empty token; defaulting ACME to placeholder (none)"
+            cat >> "$hv" << EOFACME
+
+## ACME START
+acme_dns_provider: none
+## ACME END
+EOFACME
+            chmod 600 "$hv" 2>/dev/null || true
+            return 0
+        fi
+        local cf_b64
+        cf_b64=$(printf '%s' "$cf_token" | base64 | tr -d '\n')
+        cat >> "$hv" << EOFACME
+
+## ACME START
+acme_dns_provider: cloudflare
+acme_dns_zone: "${acme_dns_zone}"
+acme_cloudflare_api_token_b64: "${cf_b64}"
+## ACME END
+EOFACME
+        print_status "ACME: Cloudflare DNS-01 settings saved (token stored base64-encoded in host_vars)"
+    else
+        echo -n -e "${BLUE}[?]${NC} GCP project ID for Cloud DNS: "
+        read -r gcp_project
+        if [ -z "$gcp_project" ]; then
+            print_error "Empty project ID; defaulting ACME to placeholder (none)"
+            cat >> "$hv" << EOFACME
+
+## ACME START
+acme_dns_provider: none
+## ACME END
+EOFACME
+            chmod 600 "$hv" 2>/dev/null || true
+            return 0
+        fi
+        echo -n -e "${BLUE}[?]${NC} Path to GCP service account JSON key file: "
+        read -r gcp_key_path
+        if [ ! -f "$gcp_key_path" ]; then
+            print_error "File not found: $gcp_key_path — defaulting ACME to placeholder (none)"
+            cat >> "$hv" << EOFACME
+
+## ACME START
+acme_dns_provider: none
+## ACME END
+EOFACME
+            chmod 600 "$hv" 2>/dev/null || true
+            return 0
+        fi
+        local gcp_json_b64
+        gcp_json_b64=$(base64 < "$gcp_key_path" | tr -d '\n')
+        cat >> "$hv" << EOFACME
+
+## ACME START
+acme_dns_provider: gcp
+acme_dns_zone: "${acme_dns_zone}"
+acme_gcp_project_id: "${gcp_project}"
+acme_gcp_dns_sa_json_b64: "${gcp_json_b64}"
+## ACME END
+EOFACME
+        print_status "ACME: GCP Cloud DNS settings saved (JSON key stored base64-encoded in host_vars)"
+    fi
+
+    chmod 600 "$hv" 2>/dev/null || true
+    print_warning "Keep host_vars/node1.yml private; it contains DNS provider credentials."
+}
+
 # Check prerequisites
 check_prerequisites
 
@@ -970,6 +1093,7 @@ if $SELECTED_PROVIDER; then
         print_error "Wallet setup failed. Please fix the issues and try again."
         exit 1
     fi
+    collect_acme_tls_settings
 else
     # Set default values for provider variables if provider playbook is not selected
     provider_region=""
