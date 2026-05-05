@@ -1,0 +1,98 @@
+---
+# Wildcard TLS for akash-gateway: Let's Encrypt (DNS-01) or self-signed placeholder
+
+- name: Fail when Cloudflare ACME is selected but token is missing
+  ansible.builtin.fail:
+    msg: "acme_dns_provider is cloudflare but acme_cloudflare_api_token_b64 is not set. Re-run setup_provider.sh and choose Cloudflare, or set acme_dns_provider to none."
+  when:
+    - acme_dns_provider | default('none') == 'cloudflare'
+    - acme_cloudflare_api_token_b64 is not defined or acme_cloudflare_api_token_b64 | length == 0
+
+- name: Fail when GCP ACME is selected but credentials are missing
+  ansible.builtin.fail:
+    msg: "acme_dns_provider is gcp but acme_gcp_project_id or acme_gcp_dns_sa_json_b64 is missing. Re-run setup_provider.sh or set acme_dns_provider to none."
+  when: acme_dns_provider | default('none') == 'gcp' and ((acme_gcp_project_id is not defined) or (acme_gcp_project_id | length == 0) or (acme_gcp_dns_sa_json_b64 is not defined) or (acme_gcp_dns_sa_json_b64 | length == 0))
+
+- name: ACME TLS via Cloudflare DNS-01
+  when: acme_dns_provider | default('none') == 'cloudflare'
+  block:
+    - name: Apply Cloudflare API token Secret (cert-manager)
+      kubernetes.core.k8s:
+        state: present
+        definition: "{{ lookup('template', 'cert-manager-cloudflare-secret.yaml.j2') | from_yaml }}"
+      no_log: true
+
+    - name: Apply ClusterIssuer (Let's Encrypt + Cloudflare)
+      kubernetes.core.k8s:
+        state: present
+        definition: "{{ lookup('template', 'clusterissuer-letsencrypt-cloudflare.yaml.j2') | from_yaml }}"
+
+    - name: Apply wildcard Certificate for akash-gateway
+      kubernetes.core.k8s:
+        state: present
+        definition: "{{ lookup('template', 'certificate-wildcard-gateway.yaml.j2') | from_yaml }}"
+
+    - name: Wait for wildcard Certificate to be Ready
+      ansible.builtin.command: kubectl -n akash-gateway wait certificate/wildcard-https --for=condition=ready --timeout=900s
+      changed_when: false
+
+    - name: Restart NGINX Gateway Fabric to pick up TLS Secret
+      ansible.builtin.command: kubectl -n nginx-gateway rollout restart deployment -l app.kubernetes.io/name=nginx-gateway-fabric
+      changed_when: true
+
+- name: ACME TLS via Google Cloud DNS
+  when: acme_dns_provider | default('none') == 'gcp'
+  block:
+    - name: Apply GCP DNS solver service account Secret (cert-manager)
+      kubernetes.core.k8s:
+        state: present
+        definition: "{{ lookup('template', 'cert-manager-gcp-dns-secret.yaml.j2') | from_yaml }}"
+      no_log: true
+
+    - name: Apply ClusterIssuer (Let's Encrypt + Cloud DNS)
+      kubernetes.core.k8s:
+        state: present
+        definition: "{{ lookup('template', 'clusterissuer-letsencrypt-gcp.yaml.j2') | from_yaml }}"
+
+    - name: Apply wildcard Certificate for akash-gateway
+      kubernetes.core.k8s:
+        state: present
+        definition: "{{ lookup('template', 'certificate-wildcard-gateway.yaml.j2') | from_yaml }}"
+
+    - name: Wait for wildcard Certificate to be Ready
+      ansible.builtin.command: kubectl -n akash-gateway wait certificate/wildcard-https --for=condition=ready --timeout=900s
+      changed_when: false
+
+    - name: Restart NGINX Gateway Fabric to pick up TLS Secret
+      ansible.builtin.command: kubectl -n nginx-gateway rollout restart deployment -l app.kubernetes.io/name=nginx-gateway-fabric
+      changed_when: true
+
+- name: Self-signed placeholder wildcard TLS (no ACME)
+  when: acme_dns_provider | default('none') not in ['cloudflare', 'gcp']
+  block:
+    - name: Stage OpenSSL config for wildcard placeholder certificate
+      ansible.builtin.template:
+        src: openssl-akash-wildcard.cnf.j2
+        dest: /root/provider/openssl-akash-wildcard.cnf
+        mode: '0644'
+
+    - name: Generate placeholder TLS material for akash-gateway
+      ansible.builtin.shell: |
+        set -euo pipefail
+        openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
+          -keyout /root/provider/akash-wildcard.key \
+          -out /root/provider/akash-wildcard.crt \
+          -config /root/provider/openssl-akash-wildcard.cnf \
+          -extensions v3_req
+      args:
+        executable: /bin/bash
+        creates: /root/provider/akash-wildcard.crt
+
+    - name: Ensure wildcard-ingress-tls Secret in akash-gateway (placeholder)
+      ansible.builtin.shell: |
+        kubectl -n akash-gateway create secret tls wildcard-ingress-tls \
+          --cert=/root/provider/akash-wildcard.crt \
+          --key=/root/provider/akash-wildcard.key \
+          --dry-run=client -o yaml | kubectl apply -f -
+      args:
+        executable: /bin/bash

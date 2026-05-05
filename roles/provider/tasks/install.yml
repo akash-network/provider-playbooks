@@ -16,6 +16,118 @@
     - name: lease
       labels:
         akash.network: 'true'
+    - name: akash-gateway
+      labels:
+        akash.network/name: akash-gateway
+        akash.network: 'true'
+
+- name: Create provider directory in specific user's home directory
+  ansible.builtin.file:
+    path: "/root/provider"
+    state: directory
+    mode: '0755'
+
+- name: Install Akash node
+  kubernetes.core.helm:
+    name: akash-node
+    chart_ref: akash/akash-node
+    release_namespace: akash-services
+
+- name: Apply Gateway API experimental CRDs for NGINX Gateway Fabric
+  ansible.builtin.shell: |
+    set -euo pipefail
+    kubectl kustomize "https://github.com/nginx/nginx-gateway-fabric/config/crd/gateway-api/experimental?ref={{ ngf_git_ref }}" | kubectl apply --server-side -f -
+  args:
+    executable: /bin/bash
+  register: ngf_crd_apply
+  changed_when: ngf_crd_apply.rc == 0
+  failed_when: ngf_crd_apply.rc != 0
+
+- name: Stage NGINX Gateway Fabric Helm values
+  ansible.builtin.copy:
+    src: nginx-gateway-fabric-values.yaml
+    dest: /root/provider/nginx-gateway-fabric-values.yaml
+    mode: '0644'
+
+- name: Install NGINX Gateway Fabric (Gateway API data plane)
+  kubernetes.core.helm:
+    name: ngf
+    chart_ref: oci://ghcr.io/nginx/charts/nginx-gateway-fabric
+    release_namespace: nginx-gateway
+    create_namespace: true
+    values_files:
+      - /root/provider/nginx-gateway-fabric-values.yaml
+
+- name: Install cert-manager
+  kubernetes.core.helm:
+    name: cert-manager
+    chart_ref: jetstack/cert-manager
+    chart_version: "{{ cert_manager_chart_version }}"
+    release_namespace: cert-manager
+    create_namespace: true
+    values:
+      crds:
+        enabled: true
+
+- name: Copy price_script.sh to /root/provider/ directory
+  ansible.builtin.copy:
+    src: "files/price_script.sh"
+    dest: "/root/provider/"
+    mode: '0755'
+
+- name: Read and base64 encode the price_script.sh file
+  ansible.builtin.shell: cat /root/provider/price_script.sh | openssl base64 -A
+  register: pricing_script_b64
+
+- name: Extract tier from attributes
+  ansible.builtin.set_fact:
+    tier: "{{ item.value }}"
+  when: item.key == 'tier'
+  loop: "{{ attributes | default([]) }}"
+  loop_control:
+    label: "{{ item.key }}"
+
+- name: Set default tier if not defined
+  ansible.builtin.set_fact:
+    tier: "community"
+  when: tier is not defined
+
+- name: copy the provider.yaml
+  ansible.builtin.template:
+    src: provider.yaml.j2
+    dest: /root/provider/provider.yaml
+
+- name: Configure wildcard TLS for Gateway (Let's Encrypt DNS-01 or self-signed placeholder)
+  ansible.builtin.import_tasks: gateway_wildcard_tls.yml
+
+- name: Generate placeholder default TLS key/cert for https-custom listener
+  ansible.builtin.shell: |
+    set -euo pipefail
+    openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
+      -keyout /root/provider/akash-default.key \
+      -out /root/provider/akash-default.crt \
+      -subj "/CN=default"
+  args:
+    executable: /bin/bash
+    creates: /root/provider/akash-default.crt
+
+- name: Ensure akash-default-tls Secret in akash-gateway (https-custom listener)
+  ansible.builtin.shell: |
+    kubectl -n akash-gateway create secret tls akash-default-tls \
+      --cert=/root/provider/akash-default.crt \
+      --key=/root/provider/akash-default.key \
+      --dry-run=client -o yaml | kubectl apply -f -
+  args:
+    executable: /bin/bash
+
+- name: Install akash-gateway (Gateway API, TCPRoutes, HTTPS listeners)
+  kubernetes.core.helm:
+    name: akash-gateway
+    chart_ref: akash/akash-gateway
+    release_namespace: akash-gateway
+    create_namespace: true
+    values_files:
+      - /root/provider/provider.yaml
 
 - name: Install Akash hostname-operator
   kubernetes.core.helm:
@@ -50,12 +162,6 @@
       inventoryConfig:
         cluster_storage: "{{ inventory_storage_classes }}"
 
-- name: Install Akash node
-  kubernetes.core.helm:
-    name: akash-node
-    chart_ref: akash/akash-node
-    release_namespace: akash-services
-
 - name: Apply Akash CRD from URL
   kubernetes.core.k8s:
     state: present
@@ -67,40 +173,6 @@
     msg: "Akash CRDs were applied successfully"
   when: k8s_result is succeeded
 
-- name: Create provider directory in specific user's home directory
-  ansible.builtin.file:
-    path: "/root/provider"
-    state: directory
-    mode: '0755'
-
-- name: Copy price_script.sh to /root/provider/ directory
-  ansible.builtin.copy:
-    src: "files/price_script.sh"
-    dest: "/root/provider/"
-    mode: '0755'
-
-- name: Read and base64 encode the price_script.sh file
-  ansible.builtin.shell: cat /root/provider/price_script.sh | openssl base64 -A
-  register: pricing_script_b64
-
-- name: Extract tier from attributes
-  ansible.builtin.set_fact:
-    tier: "{{ item.value }}"
-  when: item.key == 'tier'
-  loop: "{{ attributes | default([]) }}"
-  loop_control:
-    label: "{{ item.key }}"
-
-- name: Set default tier if not defined
-  ansible.builtin.set_fact:
-    tier: "community"
-  when: tier is not defined
-
-- name: copy the provider.yaml
-  ansible.builtin.template:
-    src: provider.yaml.j2
-    dest:  /root/provider/provider.yaml
-
 - name: Install Akash provider using Helm
   kubernetes.core.helm:
     name: akash-provider
@@ -110,58 +182,3 @@
       bidpricescript: "{{ pricing_script_b64.stdout }}"
     values_files:
       - /root/provider/provider.yaml
-
-- name: Create NGINX Ingress configuration file
-  ansible.builtin.copy:
-    dest: "/root/ingress-nginx-custom.yaml"
-    content: |
-      controller:
-        service:
-          type: ClusterIP
-        ingressClassResource:
-          name: "akash-ingress-class"
-        kind: DaemonSet
-        hostPort:
-          enabled: true
-        admissionWebhooks:
-          port: 7443
-        config:
-          allow-snippet-annotations: false
-          compute-full-forwarded-for: true
-          proxy-buffer-size: "16k"
-        metrics:
-          enabled: true
-        extraArgs:
-          enable-ssl-passthrough: true
-      tcp:
-        "8443": "akash-services/akash-provider:8443"
-        "8444": "akash-services/akash-provider:8444"
-
-- name: Install/Upgrade NGINX Ingress Controller using Helm
-  kubernetes.core.helm:
-    name: ingress-nginx
-    chart_ref: ingress-nginx/ingress-nginx
-    chart_version: 4.12.1
-    release_namespace: ingress-nginx
-    create_namespace: true
-    values_files:
-      - /root/ingress-nginx-custom.yaml
-
-- name: Apply Kubernetes labels
-  kubernetes.core.k8s:
-    state: patched
-    kind: "{{ item.kind }}"
-    name: "{{ item.name }}"
-    definition:
-      metadata:
-        labels: "{{ item.labels }}"
-  loop:
-    - kind: Namespace
-      name: ingress-nginx
-      labels:
-        app.kubernetes.io/name: ingress-nginx
-        app.kubernetes.io/instance: ingress-nginx
-    - kind: IngressClass
-      name: akash-ingress-class
-      labels:
-        akash.network: "true"

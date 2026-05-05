@@ -1,4 +1,12 @@
-This ansible role covers the steps required to get the AKash Provider up and running.
+This ansible role covers the steps required to get the Akash Provider up and running.
+
+## Edge traffic (Gateway API, not Ingress)
+
+The role installs **Kubernetes Gateway API** with **NGINX Gateway Fabric (NGF)** as the data plane, **cert-manager**, the **`akash-gateway`** Helm release (`Gateway`, `TCPRoute`, HTTPS listeners), and placeholder TLS Secrets **`wildcard-ingress-tls`** and **`akash-default-tls`** (chart defaults). It does **not** install **ingress-nginx**.
+
+**Interactive setup:** `scripts/setup_provider.sh` asks for **Cloudflare** (API token) or **GCP Cloud DNS** (project ID + service-account JSON path) so cert-manager can issue the wildcard cert automatically. Choose “skip” to keep self-signed placeholders and configure Let’s Encrypt later.
+
+Before going to production, configure DNS (including **`*.ingress.<your-domain>`** for lease HTTPS). For manual steps, see [Provider installation (prep) – DNS through TLS](https://docs.akash.network/providers/setup-and-installation/kubespray/provider-installation-prep/) (steps 7–9).
 
 ## Automatic Capability Detection
 
@@ -106,6 +114,13 @@ These variables can be customized but have default values:
 |----------|-------------|---------|
 | `provider_version` | Version for the provider CRDs to deploy| 0.6.11-rc1 |
 | `chain_id` | Blockchain network ID | Nil |
+| `ngf_git_ref` | Git ref for Gateway API CRDs bundled with NGINX Gateway Fabric | `v2.5.1` |
+| `cert_manager_chart_version` | cert-manager Helm chart version | `v1.19.1` |
+| `acme_dns_provider` | `none`, `cloudflare`, or `gcp` (set by setup script or host_vars) | `none` |
+| `acme_dns_zone` | DNS zone name for ACME DNS-01 TXT records (e.g. apex domain) | Same as `domain` if unset |
+| `acme_cloudflare_api_token_b64` | Cloudflare API token, base64-encoded (script writes this) | — |
+| `acme_gcp_project_id` | GCP project ID for Cloud DNS | — |
+| `acme_gcp_dns_sa_json_b64` | Service account JSON key file, entire file base64-encoded (script writes this) | — |
 
 ## Storage Configuration
 

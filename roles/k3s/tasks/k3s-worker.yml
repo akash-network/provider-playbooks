@@ -39,7 +39,7 @@
 - name: Install K3s agent on worker node
   ansible.builtin.shell: |
     curl -sfL https://get.k3s.io |
-    INSTALL_K3S_CHANNEL={{ k3s_version_channel }} \
+    INSTALL_K3S_VERSION={{ k3s_install_version }} \
     K3S_URL=https://{{ master_ip }}:6443 \
     K3S_TOKEN={{ k3s_token }} \
     K3S_DATA_DIR="{{ k3s_data_dir }}" \

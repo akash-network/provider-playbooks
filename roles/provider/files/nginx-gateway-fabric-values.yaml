@@ -1,0 +1,41 @@
+# NGINX Gateway Fabric (matches Akash provider docs — Gateway API data plane)
+nginxGateway:
+  gatewayClassName: nginx
+  gwAPIExperimentalFeatures:
+    enable: true
+  leaderElection:
+    enable: true
+  config:
+    logging:
+      level: info
+  resources:
+    requests:
+      cpu: 1000m
+      memory: 1Gi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+
+nginx:
+  kind: daemonSet
+  service:
+    type: ClusterIP
+  container:
+    hostPorts:
+      - port: 80
+        containerPort: 80
+      - port: 443
+        containerPort: 443
+      - port: 8443
+        containerPort: 8443
+      - port: 8444
+        containerPort: 8444
+      - port: 5002
+        containerPort: 5002
+    resources:
+      requests:
+        cpu: 1000m
+        memory: 1Gi
+      limits:
+        cpu: 1000m
+        memory: 1Gi

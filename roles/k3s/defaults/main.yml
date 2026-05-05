@@ -1,6 +1,6 @@
 ---
-# K3s and Calico defaults
-k3s_version_channel: "v1.33.7+k3s1"
+# K3s and Calico defaults (pinned release — passed to get.k3s.io as INSTALL_K3S_VERSION)
+k3s_install_version: "v1.35.3+k3s1"
 k3s_cluster_cidr: "10.42.0.0/16"
 disable_components: "traefik,network-policy"
 k3s_flannel_backend: "none"
