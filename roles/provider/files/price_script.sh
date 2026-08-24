@@ -226,21 +226,26 @@ fi
 # average number of days in a month: 30.437
 # (60/6.117)*24*60*30.437 = 429909 blocks per month
 
-# Convert the total resource cost for the deployment request into uakt/block rate
-##
 blocks_a_month=429909
-usd_per_akt=$(get_akt_price)
-total_cost_akt_target=$(bc -l <<<"(${total_cost_usd_target}/$usd_per_akt)")
-total_cost_uakt_target=$(bc -l <<<"(${total_cost_akt_target}*1000000)")
-rate_per_block_uakt=$(bc -l <<<"(${total_cost_uakt_target}/${blocks_a_month})")
 rate_per_block_usd=$(bc -l <<<"(${total_cost_usd_target}/${blocks_a_month})")
-total_cost_uakt="$(printf "%.*f" $precision $rate_per_block_uakt)"
+
+function calculate_uakt_rate {
+  local usd_per_akt total_cost_akt_target total_cost_uakt_target
+
+  usd_per_akt=$(get_akt_price)
+  total_cost_akt_target=$(bc -l <<<"(${total_cost_usd_target}/$usd_per_akt)")
+  total_cost_uakt_target=$(bc -l <<<"(${total_cost_akt_target}*1000000)")
+  rate_per_block_uakt=$(bc -l <<<"(${total_cost_uakt_target}/${blocks_a_month})")
+  total_cost_uakt="$(printf "%.*f" "$precision" "$rate_per_block_uakt")"
+}
 
 # NOTE: max_rate_usd, max_rate_uakt = are per block rates !
 
 if [[ $hasPrice = true ]]; then
   case "$denom" in
     "uakt")
+      calculate_uakt_rate
+
       # Hint: bc <<< "$a > $b" (if a is greater than b, it will return 1, otherwise 0)
       if bc <<< "$rate_per_block_uakt > $amount" | grep -qw 1; then
         printf "requested rate is too low. min expected %.*f%s" "$precision" "$rate_per_block_uakt" "$denom" >&2
@@ -249,6 +254,18 @@ if [[ $hasPrice = true ]]; then
 
       # tell the provider uakt/block rate
       printf "%.*f" "$precision" "$total_cost_uakt"
+      ;;
+
+    # ACT: assume $1 = 1 ACT (1 USD = 1e6 uact)
+    "uact")
+      rate_per_block_usd_normalized=$(bc -l <<<"(${rate_per_block_usd}*1000000)" | awk -v precision="$precision" '{printf "%.*f", precision, $0}')
+      if bc <<< "$rate_per_block_usd_normalized > $amount" | grep -qw 1; then
+        printf "requested rate is too low. min expected %.*f%s" "$precision" "$rate_per_block_usd_normalized" "$denom" >&2
+        exit 1
+      fi
+
+      # tell the provider uact/block rate
+      printf "%.*f" "$precision" "$rate_per_block_usd_normalized"
       ;;
 
     # sandbox: Axelar USDC (uausdc) ibc/12C6...
@@ -274,5 +291,6 @@ if [[ $hasPrice = true ]]; then
 
 else
   # provider only accepts rate in uakt/block when no price is received in structure (backwards compatibility)
+  calculate_uakt_rate
   printf "%.f" "$total_cost_uakt"
 fi

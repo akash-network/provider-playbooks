@@ -1,10 +1,10 @@
 ---
 - name: Check for required binaries
-  ansible.builtin.shell: "command -v op"
+  ansible.builtin.command: op --version
   register: op_binary_check
   changed_when: false
   ignore_errors: true
-  check_mode: no
+  check_mode: false
 
 - name: Set facts about missing binaries
   ansible.builtin.set_fact:

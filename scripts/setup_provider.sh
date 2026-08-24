@@ -1,2070 +1,1582 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -Eeuo pipefail
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[1;36m'
-NC='\033[0m' # No Color
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+REPO_ROOT=$(cd -- "$SCRIPT_DIR/.." && pwd)
+readonly SCRIPT_DIR REPO_ROOT
+readonly PROJECT_VENV="$REPO_ROOT/.venv"
+readonly CACHE_DIR="$REPO_ROOT/.cache"
+readonly KUBESPRAY_DIR="$CACHE_DIR/kubespray"
+readonly AKT_BIN=/usr/local/bin/akt
+readonly AKT_CONTEXT=provider
+readonly GENERATED_DIR="${PROVIDER_PLAYBOOKS_GENERATED_DIR:-$REPO_ROOT/.generated}"
+readonly INVENTORY_DIR="$GENERATED_DIR/inventory"
+readonly INVENTORY_FILE="$INVENTORY_DIR/hosts.ini"
 
-# Function to show spinning indicator
-spinner() {
-    local pid=$1
-    local delay=0.1
-    local spinstr='|/-\'
-    local msg=$2
-    local i=0
-    
-    while kill -0 $pid 2>/dev/null; do
-        i=$(( (i+1) %4 ))
-        printf "\r${GREEN}[${spinstr:$i:1}]${NC} $msg"
-        sleep $delay
-    done
-    printf "\r"  # Clear the spinner line
-}
+# shellcheck source=scripts/lib/common.sh
+source "$SCRIPT_DIR/lib/common.sh"
+# shellcheck source=scripts/lib/bootstrap.sh
+source "$SCRIPT_DIR/lib/bootstrap.sh"
+# shellcheck source=scripts/lib/storage.sh
+source "$SCRIPT_DIR/lib/storage.sh"
+trap on_error ERR
+trap cleanup_temp_paths EXIT
 
-# Function to run command with spinner
-run_with_spinner() {
-    local cmd=$1
-    local msg=$2
-    local tmpfile=$(mktemp)
-    
-    # Disable job control messages
-    set +m
-    
-    # Run the command in the background and redirect output to temp file
-    if [[ "$cmd" == *"apt-get"* ]]; then
-        # For apt-get commands, suppress all output except errors
-        (DEBIAN_FRONTEND=noninteractive $cmd -y >/dev/null 2>$tmpfile) &
-    else
-        ($cmd > $tmpfile 2>&1) &
-    fi
-    local pid=$!
-    
-    # Show spinner while command is running
-    spinner $pid "$msg"
-    
-    # Wait for command to complete
-    wait $pid
-    local status=$?
-    
-    # Re-enable job control messages
-    set -m
-    
-    # If command failed, show the error output
-    if [ $status -ne 0 ]; then
-        print_error "Command failed with exit code $status"
-        echo "Error output:"
-        cat $tmpfile
-        rm -f $tmpfile
-        return $status
-    fi
-    
-    # Clean up temp file
-    rm -f $tmpfile
-    
-    # Print completion message
-    echo -e "${GREEN}[✓]${NC} Done $msg"
-    
-    return $status
-}
+CONFIG_ONLY=false
+if [[ ${1:-} == --config-only ]]; then
+    CONFIG_ONLY=true
+elif [[ $# -gt 0 ]]; then
+    die "Usage: $0 [--config-only]"
+fi
 
-# Function to print colored output
-print_status() {
-    echo -e "${GREEN}[✓]${NC} $1"
-}
+declare -a NODE_IPS NODE_INTERNAL_IPS NODE_EXTERNAL_IPS NODE_USERS NODE_PORTS
+declare -a KUBERNETES_NODE_NAMES KUBERNETES_STORAGE_NODE_NAMES
+declare -a STORAGE_NODES STORAGE_CANDIDATE_NODE_INDEXES STORAGE_CANDIDATE_PATHS STORAGE_CANDIDATE_IDS
+declare -a STORAGE_CANDIDATE_TYPES STORAGE_CANDIDATE_SIZES STORAGE_CANDIDATE_MODELS
+declare -a STORAGE_EXCLUDED_NODE_INDEXES STORAGE_EXCLUDED_PATHS STORAGE_EXCLUDED_REASONS
+declare -a STORAGE_RECOMMENDED_CANDIDATES STORAGE_SELECTED_CANDIDATES
+declare -a GPU_PROFILES GPU_NODE_SUMMARIES
+SSH_PRIVATE_KEY=
+SSH_PUBLIC_KEY=
+CLUSTER_MODE=existing
+CONTROL_PLANE_COUNT=1
+INSTALL_OS=true
+INSTALL_GPU=false
+INSTALL_PROVIDER=true
+INSTALL_TAILSCALE=false
+INSTALL_ROOK=false
+GPU_FABRIC_MANAGER=false
 
-print_error() {
-    echo -e "${RED}[✗]${NC} $1"
-}
-
-print_warning() {
-    echo -e "${YELLOW}[!]${NC} $1"
-}
-
-print_menu_item() {
-    echo -e "${BLUE}[$1]${NC} $2"
-}
-
-# Function to get user input with validation
-get_input() {
-    local prompt=$1
-    local default=$2
-    local pattern=$3
-    local input
-    
-    while true; do
-        # Clear any pending input
-        while read -r -t 0; do read -r; done
-        
-        if [ -n "$default" ]; then
-            read -p "$prompt [$default]: " input
-            input=${input:-$default}
-        else
-            read -p "$prompt: " input
-        fi
-        
-        if [ -z "$pattern" ] || [[ $input =~ $pattern ]]; then
-            # Only output the valid input, not the error messages
-            echo "$input" >&1
-            return 0
-        else
-            # Send error message to stderr
-            print_error "Invalid input. Please try again." >&2
-            # Clear the input variable to prevent error message from being stored
-            input=""
-        fi
-    done
-}
-
-# Welcome banner
 display_welcome() {
-    clear
-    echo -e "${GREEN}╔════════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${GREEN}║                                                                ║${NC}"
-    echo -e "${GREEN}║${NC}               ${YELLOW}Akash Provider Setup Script${NC}                      ${GREEN}║${NC}"
-    echo -e "${GREEN}║                                                                ║${NC}"
-    echo -e "${GREEN}╚════════════════════════════════════════════════════════════════╝${NC}"
-    echo
-    echo -e "This script will help you set up and configure your Akash Provider."
-    echo -e "Answer a few questions and we'll handle the rest!"
-    echo
+    ui_clear
+    printf '%b╭──────────────────────────────────────────────────────────────────────╮%b\n' "$CYAN" "$NC"
+    ui_banner_line '' '' 0
+    ui_banner_line 'AKASH // PROVIDER' "$BOLD"
+    ui_banner_line 'Infrastructure installation console' "$DIM"
+    ui_banner_line '' '' 0
+    printf '%b╰──────────────────────────────────────────────────────────────────────╯%b\n' "$CYAN" "$NC"
+    if $CONFIG_ONLY; then
+        printf '\n      %bCONFIGURATION ONLY%b  No packages or clusters will be changed.\n' "$YELLOW" "$NC"
+    else
+        printf '\n      Build a secure, production-ready Akash provider cluster.\n'
+    fi
+    ui_note "Secrets and generated inventory → $GENERATED_DIR"
 }
 
-# Function to select playbooks to run
-select_playbooks() {
-    # Initialize selected playbooks
-    SELECTED_KUBERNETES=false  # New variable to track if Kubernetes is selected
-    SELECTED_KUBESPRAY=false   # Changed from true to false
-    SELECTED_K3S=false         # New variable for K3s
-    SELECTED_OS=true
-    SELECTED_GPU=true
-    SELECTED_PROVIDER=true
-    SELECTED_TAILSCALE=true
-    SELECTED_ROOK_CEPH=false  # New variable for Rook-Ceph
-    
-    # Define playbook explanations
-    KUBERNETES_DESC="Kubernetes installation (required for a new cluster)"
-    K8S_DESC="Kubernetes installation using Kubespray (production-grade, full-featured)"
-    K3S_DESC="Kubernetes installation using K3s (lightweight, single binary, ideal for edge/IoT)"
-    OS_DESC="Basic OS configuration and optimizations"
-    GPU_DESC="Are there GPU nodes in the cluster?"
-    PROVIDER_DESC="Akash Provider service installation and configuration"
-    TAILSCALE_DESC="Tailscale VPN for secure network access"
-    ROOK_CEPH_DESC="Rook-Ceph storage operator installation and configuration"
-    
-    display_welcome
-    
-    echo -e "${YELLOW}Select which playbooks you want to run:${NC}"
-    echo
-    
-    # Kubernetes Installation
+select_components() {
+    local choice
     while true; do
-        echo -n -e "${BLUE}[?]${NC} Install Kubernetes? (Required for new setup) [y/n]: "
-        read -r response
-        case $response in
-            [Yy]* ) SELECTED_KUBERNETES=true; break;;
-            [Nn]* ) SELECTED_KUBERNETES=false; break;;
-            * ) echo "Please answer y or n.";;
-        esac
-    done
-    
-    if $SELECTED_KUBERNETES; then
-        # Choose between K8s and K3s
-        echo -e "\n${YELLOW}Choose your Kubernetes distribution:${NC}"
-        echo -e "${BLUE}[1]${NC} K8s (Kubespray) - Production-grade, full-featured Kubernetes"
-        echo -e "${BLUE}[2]${NC} K3s - Lightweight, single binary, ideal for edge/IoT"
-        echo
+        INSTALL_OS=true
+        INSTALL_GPU=false
+        INSTALL_PROVIDER=true
+        INSTALL_TAILSCALE=false
+        INSTALL_ROOK=false
+
+        ui_screen "1 / 8" "Choose the Kubernetes foundation" \
+            "Only the selected distribution and its dependencies are installed."
+        ui_option "1" "Kubernetes / Kubespray" "Production-grade multi-node clusters"
+        ui_option "2" "K3s" "Lean Kubernetes without Kubespray"
+        ui_option "3" "Existing cluster" "Keep the Kubernetes installation untouched"
         while true; do
-            echo -n -e "${BLUE}[?]${NC} Select distribution (1/2) [1]: "
-            read -r response
-            case $response in
-                1|"") SELECTED_KUBESPRAY=true; SELECTED_K3S=false; break;;
-                2) SELECTED_KUBESPRAY=false; SELECTED_K3S=true; break;;
-                * ) echo "Please answer 1 or 2.";;
+            choice=$(ask "Cluster foundation" "3")
+            case "$choice" in
+                1) CLUSTER_MODE=kubespray; break ;;
+                2) CLUSTER_MODE=k3s; break ;;
+                3) CLUSTER_MODE=existing; break ;;
+                *) warn "Choose 1, 2, or 3." ;;
             esac
         done
-        echo -n -e "${BLUE}[?]${NC} Do you use a separate storage location for container images? [y/n]: "
-        read -r response
-        case $response in
-            y)
-                echo -n -e "${BLUE}[?]${NC} Please type the location where the storage is mounted (e.g., /data): "
-                read -r response
-                containerd_dir_path="$response/containerd"
-                kubelet_dir_path="$response/kubelet"
-                k3s_data_dir="$response/rancher/k3s"
-                ;;
-            n)
-                containerd_dir_path="/var/lib/containerd"
-                kubelet_dir_path="/var/lib/kubelet"
-                k3s_data_dir="/var/lib/rancher/k3s"
-                ;;
-            * ) echo "Please answer y or n.";;
+
+        ui_screen "2 / 8" "Select the provider capabilities" \
+            "Defaults are shown in uppercase in each prompt."
+        confirm "Apply provider OS tuning and maintenance jobs?" y || INSTALL_OS=false
+        confirm "Configure NVIDIA GPUs with GPU Operator?" n && INSTALL_GPU=true
+        confirm "Install the Akash provider stack?" y || INSTALL_PROVIDER=false
+        confirm "Connect nodes with Tailscale?" n && INSTALL_TAILSCALE=true
+        confirm "Install Rook-Ceph persistent storage?" n && INSTALL_ROOK=true
+
+        ui_screen "PROFILE" "Your installation profile" "Review the high-level plan before entering host details."
+        case "$CLUSTER_MODE" in
+            kubespray) ui_key_value "Cluster" "Kubernetes via Kubespray" ;;
+            k3s) ui_key_value "Cluster" "K3s" ;;
+            existing) ui_key_value "Cluster" "Existing Kubernetes" ;;
         esac
-    fi
-    
-    # OS
-    while true; do
-        echo -n -e "${BLUE}[?]${NC} Run OS playbook for system optimizations? [y/n]: "
-        read -r response
-        case $response in
-            [Yy]* ) SELECTED_OS=true; break;;
-            [Nn]* ) SELECTED_OS=false; break;;
-            * ) echo "Please answer y or n.";;
-        esac
+        ui_selected "$INSTALL_OS" "OS" "Tuning and maintenance"
+        ui_selected "$INSTALL_GPU" "GPU" "NVIDIA GPU Operator"
+        ui_selected "$INSTALL_ROOK" "Storage" "Rook-Ceph"
+        ui_selected "$INSTALL_PROVIDER" "Provider" "Akash services and gateway"
+        ui_selected "$INSTALL_TAILSCALE" "Tailscale" "Private node connectivity"
+        printf '\n'
+        confirm "Continue with this profile?" y && break
+        warn "Selection reset. Choose the installation profile again."
     done
-    
-    # GPU
-    while true; do
-        echo -n -e "${BLUE}[?]${NC} Are there GPU nodes in the cluster? (Will install NVIDIA drivers and container toolkit) [y/n]: "
-        read -r response
-        case $response in
-            [Yy]* ) 
-                SELECTED_GPU=true
-                # Ask about GPU type
-                echo
-                echo -e "${YELLOW}GPU Type Selection:${NC}"
-                echo -e "${BLUE}[1]${NC} Consumer GPUs (RTX 4090, RTX 5090, etc.)"
-                echo -e "${BLUE}[2]${NC} Data Center GPUs (H100, H200, A100, etc.)"
-                echo
-                while true; do
-                    echo -n -e "${BLUE}[?]${NC} Select GPU type (1/2) [1]: "
-                    read -r gpu_type_response
-                    case $gpu_type_response in
-                        1|"") GPU_TYPE="consumer"; break;;
-                        2) GPU_TYPE="datacenter"; break;;
-                        * ) echo "Please answer 1 or 2.";;
-                    esac
-                done
-                break
-                ;;
-            [Nn]* ) SELECTED_GPU=false; GPU_TYPE=""; break;;
-            * ) echo "Please answer y or n.";;
-        esac
-    done
-    
-    # Provider
-    while true; do
-        echo -n -e "${BLUE}[?]${NC} Install Akash Provider service? [y/n]: "
-        read -r response
-        case $response in
-            [Yy]* ) SELECTED_PROVIDER=true; break;;
-            [Nn]* ) SELECTED_PROVIDER=false; break;;
-            * ) echo "Please answer y or n.";;
-        esac
-    done
-    
-    # Tailscale
-    while true; do
-        echo -n -e "${BLUE}[?]${NC} Set up Tailscale for secure remote access? [y/n]: "
-        read -r response
-        case $response in
-            [Yy]* ) SELECTED_TAILSCALE=true; break;;
-            [Nn]* ) SELECTED_TAILSCALE=false; break;;
-            * ) echo "Please answer y or n.";;
-        esac
-    done
-    
-    # Rook-Ceph
-    while true; do
-        echo -n -e "${BLUE}[?]${NC} Install Rook-Ceph for storage management? [y/n]: "
-        read -r response
-        case $response in
-            [Yy]* ) SELECTED_ROOK_CEPH=true; break;;
-            [Nn]* ) SELECTED_ROOK_CEPH=false; break;;
-            * ) echo "Please answer y or n.";;
-        esac
-    done
-    
-    # Confirm selections
-    echo
-    echo -e "${YELLOW}You have selected the following playbooks:${NC}"
-    echo
-    if $SELECTED_KUBERNETES; then
-        if $SELECTED_KUBESPRAY; then
-            print_menu_item "✓" "K8s - ${K8S_DESC}"
-        else
-            print_menu_item "✓" "K3s - ${K3S_DESC}"
-        fi
-    else
-        print_menu_item "✗" "Kubernetes - ${KUBERNETES_DESC}"
-    fi
-    if $SELECTED_OS; then print_menu_item "✓" "OS - ${OS_DESC}"; else print_menu_item "✗" "OS - ${OS_DESC}"; fi
-    if $SELECTED_GPU; then 
-        if [ "$GPU_TYPE" = "datacenter" ]; then
-            print_menu_item "✓" "GPU - Data Center GPUs (H100, H200, A100, etc.)"
-        else
-            print_menu_item "✓" "GPU - Consumer GPUs (RTX 4090, 5090, etc.)"
-        fi
-    else 
-        print_menu_item "✗" "GPU - ${GPU_DESC}"
-    fi
-    if $SELECTED_PROVIDER; then print_menu_item "✓" "Provider - ${PROVIDER_DESC}"; else print_menu_item "✗" "Provider - ${PROVIDER_DESC}"; fi
-    if $SELECTED_TAILSCALE; then print_menu_item "✓" "Tailscale - ${TAILSCALE_DESC}"; else print_menu_item "✗" "Tailscale - ${TAILSCALE_DESC}"; fi
-    if $SELECTED_ROOK_CEPH; then print_menu_item "✓" "Rook-Ceph - ${ROOK_CEPH_DESC}"; else print_menu_item "✗" "Rook-Ceph - ${ROOK_CEPH_DESC}"; fi
-    
-    echo
-    while true; do
-        echo -n -e "${BLUE}[?]${NC} Proceed with these selections? [y/n]: "
-        read -r response
-        case $response in
-            [Yy]* ) break;;
-            [Nn]* ) echo "Restarting playbook selection..."; select_playbooks; break;;
-            * ) echo "Please answer y or n.";;
-        esac
-    done
-}
 
-# Run the menu and get selections
-select_playbooks
-
-# Function to check prerequisites
-check_prerequisites() {
-    print_status "Checking prerequisites..."
-    
-    # Check for required commands
-    local required_commands=(
-        "python3"
-        "python3-pip"
-        "ssh"
-        "ssh-keygen"
-        "openssl"
-        "yq"
-    )
-    
-    # Required packages
-    local required_packages=(
-        "python3-kubernetes"
-    )
-    
-    # Run apt-get update once at the beginning
-    run_with_spinner "apt-get update" "Updating package lists"
-    
-    for cmd in "${required_commands[@]}"; do
-        if ! command -v "$cmd" &> /dev/null; then
-            print_status "Installing $cmd..."
-            if [ "$cmd" = "yq" ]; then
-                # Download yq
-                run_with_spinner "wget -q https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/local/bin/yq" "Downloading yq"
-                # Make it executable
-                run_with_spinner "chmod +x /usr/local/bin/yq" "Making yq executable"
-            elif [ "$cmd" = "python3-pip" ]; then
-                run_with_spinner "apt-get install -y python3-pip" "Installing python3-pip"
-                # Create a symlink for pip3 if it doesn't exist
-                if ! command -v pip3 &> /dev/null; then
-                    ln -s /usr/bin/pip3 /usr/local/bin/pip3
-                fi
-            else
-                run_with_spinner "apt-get install -y $cmd" "Installing $cmd"
-            fi
-            
-            # Special case for python3-pip - check both pip3 and python3 -m pip
-            if [ "$cmd" = "python3-pip" ]; then
-                if ! command -v pip3 &> /dev/null && ! python3 -m pip --version &> /dev/null; then
-                    print_error "python3-pip installation failed"
-                    print_error "Please install python3-pip manually before continuing"
-                    exit 1
-                fi
-            # For all other commands, check normally
-            elif ! command -v "$cmd" &> /dev/null; then
-                print_error "$cmd installation failed"
-                print_error "Please install $cmd manually before continuing"
-                exit 1
-            fi
-        fi
-    done
-    
-    # Install required packages
-    for pkg in "${required_packages[@]}"; do
-        if ! dpkg -l | grep -q "$pkg"; then
-            print_status "Installing $pkg..."
-            run_with_spinner "apt-get install -y $pkg" "Installing $pkg"
-            if ! dpkg -l | grep -q "$pkg"; then
-                print_error "$pkg installation failed"
-                print_error "Please install $pkg manually before continuing"
-                exit 1
-            fi
-        fi
-    done
-    
-
-    
-    print_status "All prerequisites met"
-}
-
-# Function to setup Python environment
-setup_python_env() {
-    print_status "Setting up Python environment..."
-    
-    # Update package lists
-    run_with_spinner "apt-get update" "Updating package lists"
-    
-    # Install system packages
-    run_with_spinner "apt-get install -y python3.12-venv python3-pip python3-kubernetes" "Installing Python packages"
-    
-    # Clone Kubespray if not exists
-    cd ~
-    if [ ! -d "kubespray" ]; then
-        run_with_spinner "git clone -b v2.31.0 --depth=1 https://github.com/kubernetes-sigs/kubespray.git" "Cloning Kubespray repository v2.31.0"
-    fi
-    
-    # Setup Python virtual environment
-    print_status "Setting up Python virtual environment..."
-    cd ~/kubespray
-    
-    # Remove existing venv if it exists
-    if [ -d "venv" ]; then
-        rm -rf venv
-    fi
-    
-    # Create virtual environment
-    run_with_spinner "python3 -m venv venv" "Creating virtual environment"
-    
-    # Activate virtual environment and install requirements
-    source venv/bin/activate || {
-        print_error "Failed to activate virtual environment"
-        exit 1
-    }
-    
-    # Upgrade pip first
-    run_with_spinner "pip install --upgrade pip" "Upgrading pip"
-    
-    # Install requirements
-    run_with_spinner "pip install -r requirements.txt" "Installing Kubespray requirements"
-    
-    # Note: We also need the kubernetes module in the system Python
-    print_status "Note: The kubernetes module is installed system-wide via python3-kubernetes package"
-    
-    # Verify Ansible installation
-    if ! command -v ansible &> /dev/null; then
-        print_error "Ansible installation failed"
-        exit 1
-    fi
-    
-    print_status "Python environment setup complete"
-}
-
-# Function to validate IP address
-validate_ip() {
-    local ip=$1
-    if [[ $ip =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
-        # Check each octet is between 0 and 255
-        for octet in ${ip//./ }; do
-            if [[ $octet -lt 0 || $octet -gt 255 ]]; then
-                return 1
-            fi
-        done
-        return 0
-    fi
-    return 1
-}
-
-# Function to copy inventory
-copy_inventory() {
-    print_status "Copying sample inventory contents..."
-    cd ~/kubespray
-    # Create the directory if it doesn't exist
-    mkdir -p inventory/akash
-    # Always copy the sample files to ensure we have the latest structure
-    cp -rfp inventory/sample/* inventory/akash/
-    print_status "Sample inventory copied successfully"
-
-    # Ensure all required directories exist
-    mkdir -p inventory/akash/group_vars/all
-    mkdir -p inventory/akash/group_vars/k8s_cluster
-
-    # Verify key files exist
-    if [ ! -f inventory/akash/group_vars/k8s_cluster/k8s-cluster.yml ]; then
-        print_error "Failed to copy k8s-cluster.yml from sample inventory"
-        print_status "Creating a basic k8s-cluster.yml file"
-        cat > inventory/akash/group_vars/k8s_cluster/k8s-cluster.yml << EOF
-# Kubernetes configuration
-kube_network_plugin: calico
-container_manager: containerd
-EOF
+    if $INSTALL_ROOK && [[ $CLUSTER_MODE == k3s ]]; then
+        warn "Rook-Ceph on K3s is supported, but verify dedicated devices and the kubelet path carefully."
     fi
 }
 
-# Function to get node information
-get_node_info() {
-    local node_num=$1
-    local node_info=""
-    local node_ip=""
-    
-    while true; do
-        if [ "$node_num" = "1" ]; then
-            read -p "Enter the IP address of node $node_num (Control Plane & Worker): " node_ip
-        elif [ "$node_num" -le 3 ]; then
-            read -p "Enter the IP address of node $node_num (Control Plane & Worker): " node_ip
-        else
-            read -p "Enter the IP address of node $node_num (Worker): " node_ip
-        fi
-        
-        if validate_ip "$node_ip"; then
-            break
-        else
-            print_error "Invalid IP address format. Please use format: xxx.xxx.xxx.xxx"
-        fi
-    done
-    
-    read -p "Enter the SSH user for the node [root]: " node_user
-    node_user=${node_user:-root}
-    
-    read -p "Enter the SSH port for the node [22]: " node_port
-    node_port=${node_port:-22}
-    
-    if ! [[ "$node_port" =~ ^[0-9]+$ ]]; then
-        print_error "Invalid port number. Using default port 22."
-        node_port=22
-    fi
-    
-    echo "$node_ip|$node_user|$node_port"
-}
+collect_nodes() {
+    local count i ip user port
+    ui_screen "3 / 8" "Describe the cluster hosts" \
+        "Nodes are named node1, node2, … in the generated inventory."
+    count=$(ask "Number of cluster nodes" "1")
+    [[ $count =~ ^[1-9][0-9]*$ ]] || die "Node count must be a positive integer."
 
-# Function to check and install provider-services CLI
-check_provider_services() {
-    if ! command -v provider-services &> /dev/null; then
-        print_status "Installing provider-services CLI..."
-        cd ~
-        
-        # Install required packages
-        run_with_spinner "apt-get install -y jq unzip" "Installing required packages"
-        
-        # Download and execute the installation script
-        print_status "Downloading and running provider-services installation script..."
-        curl -sfL https://raw.githubusercontent.com/akash-network/provider/main/install.sh > install_provider.sh
-        chmod +x install_provider.sh
-        # Run the script and capture its output
-        if ! ./install_provider.sh > /dev/null 2>&1; then
-            print_error "Failed to install provider-services CLI"
-            rm -f install_provider.sh
-            return 1
-        fi
-        rm -f install_provider.sh
-        
-        # Add provider-services to PATH if not already there
-        if [ -f "$HOME/bin/provider-services" ]; then
-            export PATH="$HOME/bin:$PATH"
-            # Add to .bashrc and .zshrc for persistence
-            echo 'export PATH="$HOME/bin:$PATH"' >> ~/.bashrc
-            echo 'export PATH="$HOME/bin:$PATH"' >> ~/.zshrc
-        fi
-        
-        # Verify installation
-        if ! command -v provider-services &> /dev/null; then
-            if [ -f "$HOME/bin/provider-services" ]; then
-                # If the binary exists but isn't in PATH, use full path
-                alias provider-services="$HOME/bin/provider-services"
-                print_status "provider-services CLI installed but not in PATH, using alias"
-            else
-                print_error "Failed to install provider-services CLI"
-                return 1
-            fi
-        fi
-        print_status "provider-services CLI installed successfully"
+    if ((count >= 3)); then
+        CONTROL_PLANE_COUNT=$(ask "Number of control-plane nodes (1 or 3)" "3")
     fi
-    return 0
-}
+    [[ $CONTROL_PLANE_COUNT == 1 || $CONTROL_PLANE_COUNT == 3 ]] || die "Control-plane count must be 1 or 3."
+    ((CONTROL_PLANE_COUNT <= count)) || die "Control-plane count exceeds node count."
 
-# Function to handle wallet setup
-setup_wallet() {
-    print_status "Proceeding with wallet setup..."
-    
-    # Check if provider-services is installed
-    if ! check_provider_services; then
-        print_error "Cannot proceed with wallet setup without provider-services CLI"
-        return 1
-    fi
-    
-    # Check for existing keys
-    existing_keys=$(provider-services keys list | sed -n 's/.*name: \(.*\)/\1/p' 2>/dev/null)
-    if [ -n "$existing_keys" ]; then
-        print_status "Found existing keys: $existing_keys"
+    for ((i = 1; i <= count; i++)); do
+        printf '\n%b      NODE %s%b\n' "$BOLD" "$i" "$NC"
         while true; do
-            printf "Do you want to use an existing key? (y/n): "
-            read -r use_existing
-            
-            if [ -z "$use_existing" ]; then
-                print_error "Please enter y or n"
-                continue
+            ip=$(ask "node${i} reachable SSH IPv4 address")
+            validate_ipv4 "$ip" && break
+            warn "Invalid IPv4 address."
+        done
+        user=$(ask "node${i} SSH user" "root")
+        port=$(ask "node${i} SSH port" "22")
+        [[ $port =~ ^[0-9]+$ ]] || die "SSH port must be numeric."
+        NODE_IPS+=("$ip")
+        NODE_USERS+=("$user")
+        NODE_PORTS+=("$port")
+    done
+}
+
+select_or_create_ssh_key() {
+    local ssh_home='' ssh_dir candidate public_key
+    command -v ssh >/dev/null 2>&1 || die "OpenSSH client is required. Install openssh-client and retry."
+    command -v ssh-keygen >/dev/null 2>&1 || die "ssh-keygen is required. Install openssh-client and retry."
+    if command -v getent >/dev/null 2>&1; then
+        ssh_home=$(getent passwd "$(id -u)" 2>/dev/null | cut -d: -f6)
+    fi
+    ssh_home=${ssh_home:-${HOME:-}}
+    [[ -n $ssh_home ]] || die "Cannot determine the local user's home directory for SSH keys."
+    ssh_dir="$ssh_home/.ssh"
+    mkdir -p "$ssh_dir"
+    chmod 0700 "$ssh_dir"
+
+    for candidate in \
+        "$ssh_dir/provider_playbooks_ed25519" \
+        "$ssh_dir/id_ed25519" \
+        "$ssh_dir/id_ecdsa" \
+        "$ssh_dir/id_rsa"; do
+        if [[ -r $candidate ]] && public_key=$(ssh-keygen -y -P '' -f "$candidate" 2>/dev/null); then
+            SSH_PRIVATE_KEY=$candidate
+            # Always derive the public key from the private key. A stale sibling
+            # .pub file must never instruct operators to authorize another key.
+            SSH_PUBLIC_KEY=$public_key
+            return
+        fi
+    done
+
+    SSH_PRIVATE_KEY="$ssh_dir/provider_playbooks_ed25519"
+    run "Generating a dedicated installer SSH key" \
+        ssh-keygen -q -t ed25519 -N '' -C "provider-playbooks@$(hostname)" -f "$SSH_PRIVATE_KEY"
+    chmod 0600 "$SSH_PRIVATE_KEY"
+    chmod 0644 "$SSH_PRIVATE_KEY.pub"
+    SSH_PUBLIC_KEY=$(<"$SSH_PRIVATE_KEY.pub")
+}
+
+ssh_to_node() {
+    local index=$1
+    shift
+    ssh -o BatchMode=yes -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no \
+        -o ConnectTimeout=8 -o StrictHostKeyChecking=accept-new -o IdentitiesOnly=yes \
+        -i "$SSH_PRIVATE_KEY" -p "${NODE_PORTS[$index]}" \
+        "${NODE_USERS[$index]}@${NODE_IPS[$index]}" "$@"
+}
+
+all_nodes_accept_ssh_key() {
+    local i
+    for i in "${!NODE_IPS[@]}"; do
+        ssh_to_node "$i" true >/dev/null 2>&1 || return 1
+    done
+}
+
+show_ssh_key_instructions() {
+    local i
+    ui_screen "SSH ACCESS" "Authorize the installer key" \
+        "Password login is not supported. Add this public key to every configured SSH user."
+    ui_key_value "Private key selected" "$SSH_PRIVATE_KEY"
+    printf '\n%b      COPY THIS PUBLIC KEY%b\n\n' "$BOLD" "$NC"
+    printf '%b%s%b\n' "$CYAN" "$SSH_PUBLIC_KEY" "$NC"
+    printf '\n%b      TARGET USERS%b\n' "$BOLD" "$NC"
+    for i in "${!NODE_IPS[@]}"; do
+        ui_key_value "node$((i + 1))" "${NODE_USERS[$i]}@${NODE_IPS[$i]}:${NODE_PORTS[$i]}"
+    done
+    ui_note "On each node, as that SSH user:"
+    printf '\n      mkdir -p ~/.ssh && chmod 700 ~/.ssh\n'
+    printf '      Open ~/.ssh/authorized_keys, paste the key on its own line, then run:\n'
+    printf '      chmod 600 ~/.ssh/authorized_keys\n'
+}
+
+validate_remote_sudo() {
+    local i
+    for i in "${!NODE_IPS[@]}"; do
+        # shellcheck disable=SC2016 # id must expand on the remote node.
+        if ! ssh_to_node "$i" 'if [ "$(id -u)" -eq 0 ]; then true; else sudo -n true; fi' >/dev/null 2>&1; then
+            die "Non-interactive sudo is unavailable for ${NODE_USERS[$i]}@${NODE_IPS[$i]}. Configure passwordless sudo for that user, then retry."
+        fi
+    done
+}
+
+configure_ssh_access() {
+    local response
+    select_or_create_ssh_key
+    while ! all_nodes_accept_ssh_key; do
+        show_ssh_key_instructions
+        response=$(ask "Press Enter after installing the key on every node, or type q to quit")
+        [[ ${response,,} == q ]] && die "SSH key setup cancelled."
+    done
+    validate_remote_sudo
+    info "SSH key access verified on every node."
+}
+
+is_private_ipv4() {
+    local ip=$1 first second
+    validate_ipv4 "$ip" || return 1
+    IFS=. read -r first second _ <<<"$ip"
+    [[ $first == 10 ]] || [[ $first == 192 && $second == 168 ]] || \
+        [[ $first == 172 && $second -ge 16 && $second -le 31 ]]
+}
+
+detect_node_private_ips() {
+    local index=$1 output candidate
+    output=$(ssh_to_node "$index" "hostname -I" 2>/dev/null) || return 1
+    for candidate in $output; do
+        is_private_ipv4 "$candidate" && printf '%s\n' "$candidate"
+    done
+}
+
+detect_node_public_ip() {
+    local index=$1 output
+    output=$(ssh_to_node "$index" \
+        "if command -v curl >/dev/null 2>&1; then curl -4 --fail --silent --max-time 8 https://api.ipify.org; elif command -v wget >/dev/null 2>&1; then wget -qO- -T 8 https://api.ipify.org; else exit 1; fi" \
+        2>/dev/null) || return 1
+    validate_ipv4 "$output" || return 1
+    is_private_ipv4 "$output" && return 1
+    printf '%s' "$output"
+}
+
+collect_node_networking() {
+    if [[ $CLUSTER_MODE == existing ]]; then
+        NODE_INTERNAL_IPS=("${NODE_IPS[@]}")
+        NODE_EXTERNAL_IPS=("${NODE_IPS[@]}")
+        return
+    fi
+    local i detected public_ip private_ready=true public_ready=true addresses_differ=false
+    local -a detected_private_ips=() detected_public_ips=()
+    local -A seen_public_ips=()
+    for i in "${!NODE_IPS[@]}"; do
+        detected=$(detect_node_private_ips "$i" | head -n 1 || true)
+        if [[ -z $detected ]]; then
+            private_ready=false
+            detected=${NODE_IPS[$i]}
+        fi
+        detected_private_ips+=("$detected")
+        public_ip=$(detect_node_public_ip "$i" || true)
+        if [[ -z $public_ip || -n ${seen_public_ips[$public_ip]:-} ]]; then
+            public_ready=false
+            public_ip=${NODE_IPS[$i]}
+        else
+            seen_public_ips[$public_ip]=true
+        fi
+        detected_public_ips+=("$public_ip")
+        [[ $detected != "$public_ip" ]] && addresses_differ=true
+    done
+    NODE_EXTERNAL_IPS=("${detected_public_ips[@]}")
+
+    if $private_ready && $public_ready && $addresses_differ; then
+        ui_screen "NETWORK" "Choose inter-node networking" \
+            "SSH keeps its entered address. Choose which detected network Kubernetes should advertise."
+        for i in "${!NODE_IPS[@]}"; do
+            ui_key_value "node$((i + 1)) private" "${detected_private_ips[$i]}"
+            ui_key_value "node$((i + 1)) public" "${detected_public_ips[$i]}"
+        done
+        printf '\n'
+        if confirm "Use private addresses for Kubernetes inter-node traffic?" y; then
+            NODE_INTERNAL_IPS=("${detected_private_ips[@]}")
+            return
+        fi
+        NODE_INTERNAL_IPS=("${detected_public_ips[@]}")
+        warn "Public inter-node addresses must be bound or routed directly to each host."
+        return
+    fi
+
+    if $private_ready; then
+        NODE_INTERNAL_IPS=("${detected_private_ips[@]}")
+    elif $public_ready; then
+        NODE_INTERNAL_IPS=("${detected_public_ips[@]}")
+    else
+        NODE_INTERNAL_IPS=("${NODE_IPS[@]}")
+        NODE_EXTERNAL_IPS=("${NODE_IPS[@]}")
+        ui_note "Automatic network detection was incomplete; using the entered SSH addresses."
+    fi
+}
+
+detect_kubernetes_node_names() {
+    local i j cluster_nodes remote_names candidate_index candidate name hostname_label internal_ip external_ip
+    local storage_label_count
+    local -a cluster_names=() cluster_storage_names=() cluster_internal_ips=() cluster_external_ips=()
+    local -a hostname_candidate_indexes=() name_candidate_indexes=() ip_candidate_indexes=()
+    KUBERNETES_NODE_NAMES=()
+    KUBERNETES_STORAGE_NODE_NAMES=()
+    if [[ $CLUSTER_MODE != existing ]]; then
+        for i in "${!NODE_IPS[@]}"; do
+            KUBERNETES_NODE_NAMES+=("node$((i + 1))")
+            KUBERNETES_STORAGE_NODE_NAMES+=("node$((i + 1))")
+        done
+        return
+    fi
+
+    if ! cluster_nodes=$(ssh_to_node 0 \
+        "sudo -n kubectl get nodes --no-headers -o 'custom-columns=NAME:.metadata.name,HOSTNAME:.metadata.labels.kubernetes\\.io/hostname,INTERNAL_IP:.status.addresses[?(@.type==\"InternalIP\")].address,EXTERNAL_IP:.status.addresses[?(@.type==\"ExternalIP\")].address'" \
+        2>/dev/null); then
+        die "Unable to list Kubernetes nodes from node1. Verify that kubectl can access the existing cluster with sudo."
+    fi
+    [[ -n $cluster_nodes ]] || die "The existing Kubernetes cluster did not report any nodes."
+
+    while read -r name hostname_label internal_ip external_ip _; do
+        [[ -n $name ]] || continue
+        if [[ -z $hostname_label || $hostname_label == '<none>' ]]; then
+            $INSTALL_ROOK && \
+                die "Kubernetes node $name has no kubernetes.io/hostname label; Rook-Ceph requires one."
+            hostname_label=$name
+        fi
+        cluster_names+=("$name")
+        cluster_storage_names+=("$hostname_label")
+        cluster_internal_ips+=("$internal_ip")
+        cluster_external_ips+=("$external_ip")
+    done <<<"$cluster_nodes"
+    ((${#cluster_names[@]} > 0)) || die "Unable to parse the Kubernetes node list from the existing cluster."
+
+    for i in "${!NODE_IPS[@]}"; do
+        # shellcheck disable=SC2016 # Hostname expansion happens on the remote node.
+        remote_names=$(ssh_to_node "$i" 'printf "%s\n" "$(hostname -s)" "$(hostname -f 2>/dev/null || true)"' 2>/dev/null || true)
+        candidate_index=
+        # Hostnames are authoritative. IPs may be shared by NAT or differentiated
+        # only by the entered SSH port, so consider them only in a second pass.
+        hostname_candidate_indexes=()
+        name_candidate_indexes=()
+        for j in "${!cluster_names[@]}"; do
+            grep -Fxq "${cluster_storage_names[$j]}" <<<"$remote_names" && \
+                hostname_candidate_indexes+=("$j")
+            grep -Fxq "${cluster_names[$j]}" <<<"$remote_names" && \
+                name_candidate_indexes+=("$j")
+        done
+        if ((${#hostname_candidate_indexes[@]} == 1)); then
+            candidate_index=${hostname_candidate_indexes[0]}
+        elif ((${#hostname_candidate_indexes[@]} == 0 && ${#name_candidate_indexes[@]} == 1)); then
+            candidate_index=${name_candidate_indexes[0]}
+        fi
+
+        if [[ -z $candidate_index ]]; then
+            ip_candidate_indexes=()
+            for j in "${!cluster_names[@]}"; do
+                if [[ ${cluster_internal_ips[$j]} == "${NODE_IPS[$i]}" || \
+                      ${cluster_external_ips[$j]} == "${NODE_IPS[$i]}" || \
+                      ${cluster_internal_ips[$j]} == "${NODE_INTERNAL_IPS[$i]}" || \
+                      ${cluster_external_ips[$j]} == "${NODE_EXTERNAL_IPS[$i]}" ]]; then
+                    ip_candidate_indexes+=("$j")
+                fi
+            done
+            if ((${#ip_candidate_indexes[@]} == 1)); then
+                j=${ip_candidate_indexes[0]}
+                if [[ " ${KUBERNETES_NODE_NAMES[*]:-} " != *" ${cluster_names[$j]} "* ]]; then
+                    candidate_index=$j
+                fi
             fi
-            
-            case "$use_existing" in
-                y|Y)
-                    print_status "Available keys: $existing_keys"
-                    while true; do
-                        printf "Enter the name of the key you want to use: "
-                        read -r key_name
-                        if [ -z "$key_name" ]; then
-                            print_error "Please enter a key name"
-                            continue
-                        fi
-                        if echo "$existing_keys" | grep -q "^$key_name$"; then
-                            wallet_address=$(provider-services keys show "$key_name" -a)
-                            print_status "Using existing key: $key_name with address: $wallet_address"
-                            
-                            # Export and show the key
-                            print_status "Exporting and showing key..."
-                            # Use script to capture the output
-                            script -q -c "provider-services keys export $key_name" /dev/null | tee key.pem
-                            
-                            # Clean up the output file to only include the key and remove prompt lines
-                            sed -i -n '/-----BEGIN TENDERMINT PRIVATE KEY-----/,/-----END TENDERMINT PRIVATE KEY-----/p' key.pem
+        fi
 
-                            # Check if the file was created and contains the key
-                            if [ -f "key.pem" ] && grep -q "BEGIN TENDERMINT PRIVATE KEY" key.pem; then
-                                print_status "Key has been exported to key.pem"
-                                
-                                # Base64 encode the key
-                                key_b64=$(cat key.pem | base64 | tr -d '\n')
-                                
-                                # Create host_vars directory if it doesn't exist
-                                mkdir -p /root/provider-playbooks/host_vars
+        if [[ -n $candidate_index && \
+              " ${KUBERNETES_NODE_NAMES[*]:-} " == *" ${cluster_names[$candidate_index]} "* ]]; then
+            candidate_index=
+        fi
 
-                                # Update the host_vars file with the wallet information
-                                cat > /root/provider-playbooks/host_vars/node1.yml << EOF
-# Node Configuration - Host Vars File
-
-## Provider Identification
-akash1_address: "$wallet_address"
-provider_b64_key: "$key_b64"
-provider_b64_keysecret: ""  # Will be filled after password entry
-
-## Network Configuration
-domain: "${provider_name}"
-region: "${provider_region}"
-
-## Organization Details
-host: "akash"
-organization: "${provider_organization}"
-email: "${provider_email}"
-website: "${provider_website}"
-
-## Tailscale Configuration
-tailscale_hostname: "node1-$(echo "${provider_name}" | tr '.' '-')"
-tailscale_authkey: "${tailscale_authkey}"
-
-# provider attributes
-attributes:
-  - key: host
-    value: akash
-  - key: tier
-    value: community
-
-## Notes:
-# - Replace empty values with your actual configuration
-# - Keep sensitive values secure and never share them publicly
-# - Ensure domain format follows Akash naming conventions
-EOF
-                                
-                                print_status "Key has been encoded and saved to /root/provider-playbooks/host_vars/node1.yml"
-                                print_status "Wallet address: $wallet_address"
-                                
-                                # Prompt for key password and save it
-                                print_status "Please enter the password you used to encrypt the key"
-                                echo -n "Password> "
-                                read -s key_password
-                                echo
-                                
-                                # Encode the password and save it
-                                password_b64=$(echo -n "$key_password" | base64 | tr -d '\n')
-                                # Update the keysecret in the file
-                                sed -i "s|provider_b64_keysecret: \"\"|provider_b64_keysecret: \"$password_b64\"|" /root/provider-playbooks/host_vars/node1.yml
-                                print_status "Key password has been encoded and saved to /root/provider-playbooks/host_vars/node1.yml"
-                                
-                                # Clean up
-                                rm -f key.pem
-                                
-                                print_status "Wallet setup and configuration complete!"
-                                print_status "Your wallet address is: $wallet_address"
-                                
-                                return 0
-                            else
-                                print_error "Failed to export key to key.pem"
-                                rm -f key.pem
-                                return 1
-                            fi
-                        else
-                            print_error "Key '$key_name' not found. Available keys: $existing_keys"
-                        fi
-                    done
-                    ;;
-                n|N)
+        while [[ -z $candidate_index ]]; do
+            ui_screen "KUBERNETES" "Match the existing cluster nodes" \
+                "The Ansible aliases stay node1, node2, …; Rook also needs each hostname label."
+            for j in "${!cluster_names[@]}"; do
+                printf '      %-24s hostname %-24s internal %-15s external %s\n' \
+                    "${cluster_names[$j]}" "${cluster_storage_names[$j]}" \
+                    "${cluster_internal_ips[$j]}" "${cluster_external_ips[$j]}"
+            done
+            printf '\n'
+            candidate=$(ask_required "Kubernetes node name for node$((i + 1))")
+            candidate_index=
+            for j in "${!cluster_names[@]}"; do
+                if [[ ${cluster_names[$j]} == "$candidate" ]]; then
+                    candidate_index=$j
                     break
-                    ;;
-                *)
-                    print_error "Invalid option. Please enter y or n"
-                    ;;
-            esac
-        done
-    else
-        print_status "No existing keys found. Proceeding with key creation options..."
-    fi
-
-    # Only ask about creating/importing a key if we're not using an existing one
-    if [ "$use_existing" != "y" ] && [ "$use_existing" != "Y" ]; then
-        # Ask if user wants to create new key or import existing
-        while true; do
-            printf "Do you want to create a new key, import from key file, import from seed phrase, or paste existing key? (new/key/seed/paste): "
-            read -r key_option
-            
-            if [ -z "$key_option" ]; then
-                print_error "Please enter an option"
-                continue
-            fi
-            
-            case "$key_option" in
-                new|key|seed|paste)
-                    break
-                    ;;
-                *)
-                    print_error "Invalid option. Please enter 'new', 'key', 'seed', or 'paste'"
-                    ;;
-            esac
-        done
-        
-        if [[ "$key_option" == "new" ]]; then
-            print_status "Creating new wallet key..."
-            # Create the key and capture the output
-            key_output=$(provider-services keys add default)
-            # Extract address from the output using grep and cut
-            wallet_address=$(echo "$key_output" | grep "address:" | cut -d: -f2 | tr -d ' ')
-            print_status "New wallet created with address: $wallet_address"
-        elif [[ "$key_option" == "key" ]]; then
-            print_status "Importing existing wallet key..."
-            read -p "Enter the path to your key.pem file: " key_path
-            if [ ! -f "$key_path" ]; then
-                print_error "Key file not found at $key_path"
-                return 1
-            fi
-            provider-services keys import default "$key_path"
-            # Get the address after import
-            wallet_address=$(provider-services keys show default -a)
-            print_status "Wallet imported with address: $wallet_address"
-        elif [[ "$key_option" == "paste" ]]; then
-            print_status "Pasting existing AKT address key and key secret..."
-            read -p "Enter your AKT address: " wallet_address
-            read -p "Enter your base64 encoded key: " key_b64
-            read -p "Enter your base64 encoded key secret: " password_b64
-            
-            # Create host_vars directory if it doesn't exist
-            mkdir -p /root/provider-playbooks/host_vars
-
-            # Update the host_vars file with the wallet information
-            cat > /root/provider-playbooks/host_vars/node1.yml << EOF
-# Node Configuration - Host Vars File
-
-## Provider Identification
-akash1_address: "$wallet_address"
-provider_b64_key: "$key_b64"
-provider_b64_keysecret: "$password_b64"
-
-## Network Configuration
-domain: "${provider_name}"
-region: "${provider_region}"
-
-## Organization Details
-host: "akash"
-organization: "${provider_organization}"
-email: "${provider_email}"
-website: "${provider_website}"
-
-## Tailscale Configuration
-tailscale_hostname: "node1-$(echo "${provider_name}" | tr '.' '-')"
-tailscale_authkey: "${tailscale_authkey}"
-
-# provider attributes
-attributes:
-  - key: host
-    value: akash
-  - key: tier
-    value: community
-
-## Notes:
-# - Replace empty values with your actual configuration
-# - Keep sensitive values secure and never share them publicly
-# - Ensure domain format follows Akash naming conventions
-EOF
-            
-            print_status "Wallet information has been saved to /root/provider-playbooks/host_vars/node1.yml"
-            print_status "Wallet address: $wallet_address"
-            return 0
-        else
-            print_status "Importing wallet from seed phrase..."
-            provider-services keys add default --recover
-            # Get the address after recovery
-            wallet_address=$(provider-services keys show default -a)
-            print_status "Wallet recovered with address: $wallet_address"
-        fi
-    fi
-    
-    # Verify we have a wallet address
-    if [ -z "$wallet_address" ]; then
-        print_error "Failed to get wallet address"
-        return 1
-    fi
-    
-    # Small delay to ensure key operations are complete
-    sleep 1
-    
-    # Export and show the key
-    print_status "Exporting and showing key..."
-    # Use script to capture the output
-    script -q -c "provider-services keys export default" /dev/null | tee key.pem
-    
-    # Clean up the output file to only include the key and remove prompt lines
-    sed -i -n '/-----BEGIN TENDERMINT PRIVATE KEY-----/,/-----END TENDERMINT PRIVATE KEY-----/p' key.pem
-
-    # Check if the file was created and contains the key
-    if [ -f "key.pem" ] && grep -q "BEGIN TENDERMINT PRIVATE KEY" key.pem; then
-        print_status "Key has been exported to key.pem"
-        
-        # Base64 encode the key
-        key_b64=$(cat key.pem | base64 | tr -d '\n')
-        
-        # Create host_vars directory if it doesn't exist
-        mkdir -p /root/provider-playbooks/host_vars
-
-        # Update the host_vars file with the wallet information
-        cat > /root/provider-playbooks/host_vars/node1.yml << EOF
-# Node Configuration - Host Vars File
-
-## Provider Identification
-akash1_address: "$wallet_address"
-provider_b64_key: "$key_b64"
-provider_b64_keysecret: ""  # Will be filled after password entry
-
-## Network Configuration
-domain: "${provider_name}"
-region: "${provider_region}"
-
-## Organization Details
-host: "akash"
-organization: "${provider_organization}"
-email: "${provider_email}"
-website: "${provider_website}"
-
-## Tailscale Configuration
-tailscale_hostname: "node1-$(echo "${provider_name}" | tr '.' '-')"
-tailscale_authkey: "${tailscale_authkey}"
-
-# provider attributes
-attributes:
-  - key: host
-    value: akash
-  - key: tier
-    value: community
-
-## Notes:
-# - Replace empty values with your actual configuration
-# - Keep sensitive values secure and never share them publicly
-# - Ensure domain format follows Akash naming conventions
-EOF
-        
-
-    
-        print_status "Key has been encoded and saved to /root/provider-playbooks/host_vars/node1.yml"
-        print_status "Wallet address: $wallet_address"
-        
-        # Prompt for key password and save it
-        print_status "Please enter the password you used to encrypt the key"
-        echo -n "Password> "
-        read -s key_password
-        echo
-        
-        # Encode the password and save it
-        password_b64=$(echo -n "$key_password" | base64 | tr -d '\n')
-        # Update the keysecret in the file
-        sed -i "s|provider_b64_keysecret: \"\"|provider_b64_keysecret: \"$password_b64\"|" /root/provider-playbooks/host_vars/node1.yml
-        print_status "Key password has been encoded and saved to /root/provider-playbooks/host_vars/node1.yml"
-        
-        # Clean up
-        rm -f key.pem
-        
-        print_status "Wallet setup and configuration complete!"
-        print_status "Your wallet address is: $wallet_address"
-        print_warning "Please make sure to backup your seed phrase!"
-        
-        # Ask for confirmation that seed phrase is backed up
-        while true; do
-            read -p "Have you backed up your seed phrase? (Type YES to continue): " backup_confirmation
-            if [ "$backup_confirmation" = "YES" ]; then
-                print_status "Thank you for confirming your seed phrase backup"
-                break
-            else
-                print_warning "Please backup your seed phrase before continuing"
-                print_warning "Type YES when you have backed up your seed phrase"
-            fi
-        done
-        
-        return 0
-    else
-        print_error "Failed to export key to key.pem"
-        rm -f key.pem
-        return 1
-    fi
-}
-
-# Remove a prior ACME block from node1 host_vars (markers ## ACME START / ## ACME END)
-strip_acme_block_from_host_vars() {
-    local hv="/root/provider-playbooks/host_vars/node1.yml"
-    [ -f "$hv" ] || return 0
-    sed -i '/^## ACME START$/,/^## ACME END$/d' "$hv"
-}
-
-# Prompt for cert-manager DNS-01 credentials (Cloudflare or GCP) and append to host_vars
-collect_acme_tls_settings() {
-    local hv="/root/provider-playbooks/host_vars/node1.yml"
-    if [ ! -f "$hv" ]; then
-        print_warning "host_vars/node1.yml not found; skipping ACME prompts"
-        return 0
-    fi
-
-    print_status "Gateway TLS (Let's Encrypt via DNS-01)"
-    echo -e "${YELLOW}Choose how cert-manager should obtain the wildcard certificate for Akash Gateway:${NC}"
-    echo -e "  ${BLUE}1${NC} Cloudflare — API token with DNS edit on the zone used for ${provider_name}"
-    echo -e "  ${BLUE}2${NC} Google Cloud DNS — service account JSON with DNS admin rights"
-    echo -e "  ${BLUE}3${NC} Skip — use self-signed placeholder TLS (replace with Let's Encrypt later)"
-    echo
-    local acme_choice=""
-    while true; do
-        echo -n -e "${BLUE}[?]${NC} Select option (1/2/3) [3]: "
-        read -r acme_choice
-        case "${acme_choice:-3}" in
-            1) acme_choice=1; break;;
-            2) acme_choice=2; break;;
-            3|"") acme_choice=3; break;;
-            *) echo "Please enter 1, 2, or 3.";;
-        esac
-    done
-
-    strip_acme_block_from_host_vars
-
-    if [ "$acme_choice" = "3" ] || [ "$acme_choice" = "" ]; then
-        cat >> "$hv" << EOFACME
-
-## ACME START
-acme_dns_provider: none
-## ACME END
-EOFACME
-        print_status "ACME: using placeholder TLS (acme_dns_provider: none)"
-        chmod 600 "$hv" 2>/dev/null || true
-        return 0
-    fi
-
-    echo -n -e "${BLUE}[?]${NC} DNS zone name for ACME TXT records (usually apex, e.g. example.com) [${provider_name}]: "
-    read -r acme_dns_zone_in
-    local acme_dns_zone="${acme_dns_zone_in:-$provider_name}"
-
-    if [ "$acme_choice" = "1" ]; then
-        echo -e "${YELLOW}Create a Cloudflare API token with Zone.DNS:Edit and Zone.Zone:Read for this zone.${NC}"
-        echo -n -e "${BLUE}[?]${NC} Paste Cloudflare API token (input hidden): "
-        read -r -s cf_token
-        echo
-        if [ -z "$cf_token" ]; then
-            print_error "Empty token; defaulting ACME to placeholder (none)"
-            cat >> "$hv" << EOFACME
-
-## ACME START
-acme_dns_provider: none
-## ACME END
-EOFACME
-            chmod 600 "$hv" 2>/dev/null || true
-            return 0
-        fi
-        local cf_b64
-        cf_b64=$(printf '%s' "$cf_token" | base64 | tr -d '\n')
-        cat >> "$hv" << EOFACME
-
-## ACME START
-acme_dns_provider: cloudflare
-acme_dns_zone: "${acme_dns_zone}"
-acme_cloudflare_api_token_b64: "${cf_b64}"
-## ACME END
-EOFACME
-        print_status "ACME: Cloudflare DNS-01 settings saved (token stored base64-encoded in host_vars)"
-    else
-        echo -n -e "${BLUE}[?]${NC} GCP project ID for Cloud DNS: "
-        read -r gcp_project
-        if [ -z "$gcp_project" ]; then
-            print_error "Empty project ID; defaulting ACME to placeholder (none)"
-            cat >> "$hv" << EOFACME
-
-## ACME START
-acme_dns_provider: none
-## ACME END
-EOFACME
-            chmod 600 "$hv" 2>/dev/null || true
-            return 0
-        fi
-        echo -n -e "${BLUE}[?]${NC} Path to GCP service account JSON key file: "
-        read -r gcp_key_path
-        if [ ! -f "$gcp_key_path" ]; then
-            print_error "File not found: $gcp_key_path — defaulting ACME to placeholder (none)"
-            cat >> "$hv" << EOFACME
-
-## ACME START
-acme_dns_provider: none
-## ACME END
-EOFACME
-            chmod 600 "$hv" 2>/dev/null || true
-            return 0
-        fi
-        local gcp_json_b64
-        gcp_json_b64=$(base64 < "$gcp_key_path" | tr -d '\n')
-        cat >> "$hv" << EOFACME
-
-## ACME START
-acme_dns_provider: gcp
-acme_dns_zone: "${acme_dns_zone}"
-acme_gcp_project_id: "${gcp_project}"
-acme_gcp_dns_sa_json_b64: "${gcp_json_b64}"
-## ACME END
-EOFACME
-        print_status "ACME: GCP Cloud DNS settings saved (JSON key stored base64-encoded in host_vars)"
-    fi
-
-    chmod 600 "$hv" 2>/dev/null || true
-    print_warning "Keep host_vars/node1.yml private; it contains DNS provider credentials."
-}
-
-# Check prerequisites
-check_prerequisites
-
-# Setup Python environment
-setup_python_env
-
-# Copy the sample inventory to set up the directory structure
-cd ~/kubespray
-copy_inventory
-cd ~
-
-# Get user input
-print_status "Gathering configuration information..."
-
-# Set default values for storage (will be overridden if user selected custom path earlier)
-# These defaults are only used if Kubernetes was not selected
-containerd_dir_path="${containerd_dir_path:-/var/lib/containerd}"
-kubelet_dir_path="${kubelet_dir_path:-/var/lib/kubelet}"
-k3s_data_dir="${k3s_data_dir:-/var/lib/rancher/k3s}"
-
-# Configure Container Storage
-print_status "Configuring Container Storage..."
-
-# Create directories based on which Kubernetes distribution was selected
-if $SELECTED_KUBERNETES; then
-    if $SELECTED_K3S; then
-        # K3s needs k3s_data_dir
-        mkdir -p "$k3s_data_dir"
-    elif $SELECTED_KUBESPRAY; then
-        # Kubespray needs containerd_dir_path
-        mkdir -p "$containerd_dir_path"
-    fi
-fi
-
-# Check if Kubespray inventory directory exists
-if [ ! -d ~/kubespray/inventory/akash/group_vars/k8s_cluster ]; then
-    print_status "Creating Kubespray inventory directories..."
-    mkdir -p ~/kubespray/inventory/akash/group_vars/k8s_cluster
-fi
-
-# Note: Kubespray configuration files will be created later after gathering user input
-# This ensures the correct storage paths are used based on user preferences
-
-# Get provider domain name only if provider or tailscale is selected
-if $SELECTED_PROVIDER || $SELECTED_TAILSCALE; then
-    print_status "Provider Domain Information:"
-    provider_name=$(get_input "Enter your provider domain name (e.g., example.com or test.example.com) Do not include "provider."" "" "[a-zA-Z0-9.-]+\.[a-zA-Z0-9.-]+")
-else
-    provider_name=""
-fi
-
-# Provider Information
-if $SELECTED_PROVIDER; then
-    print_status "Provider Information:"
-    provider_region=$(get_input "Enter your provider region (e.g., us-west)" "" "[a-z0-9-]+")
-    provider_organization=$(get_input "Enter your organization name" "" "[a-zA-Z0-9\s-]+")
-    provider_email=$(get_input "Enter your contact email" "" "[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")
-    provider_website=$(get_input "Enter your organization website" "" "[a-zA-Z0-9.-]+\.[a-zA-Z0-9.-]+")
-    
-    # Run wallet setup right after collecting provider info
-    print_status "Setting up Akash wallet..."
-    if ! setup_wallet; then
-        print_error "Wallet setup failed. Please fix the issues and try again."
-        exit 1
-    fi
-    collect_acme_tls_settings
-else
-    # Set default values for provider variables if provider playbook is not selected
-    provider_region=""
-    provider_organization=""
-    provider_email=""
-    provider_website=""
-fi
-
-# This is set for now until we have a way to use existing hosts.yaml
-USE_EXISTING_HOSTS=false
-
-# Container storage paths are already set earlier during playbook selection
-
-# Only collect node information if we're not using existing hosts.yaml
-if [ "$USE_EXISTING_HOSTS" = false ]; then
-    print_status "Node Information:"
-    num_nodes=$(get_input "How many nodes do you have in your cluster?" "1" "^[0-9]+$")
-
-    # Get node information for all nodes
-    nodes=()
-    for i in $(seq 1 $num_nodes); do
-        print_status "Node $i Information:"
-        node_info=$(get_node_info $i)
-        nodes+=("$node_info")
-    done
-    
-    # Configure Rook-Ceph if selected
-    if $SELECTED_ROOK_CEPH; then
-        print_status "Configuring Rook-Ceph storage..."
-        
-        # Use existing node names for storage selection
-        storage_nodes=()
-        echo -e "${YELLOW}Select which nodes will be used for Rook-Ceph storage:${NC}"
-        for i in $(seq 1 $num_nodes); do
-            node_ip=$(echo ${nodes[$i-1]} | cut -d'|' -f1)
-            while true; do
-                echo -n -e "${BLUE}[?]${NC} Use node$i ($node_ip) for persistent storage? [y/n]: "
-                read -r response
-                case $response in
-                    [Yy]* ) storage_nodes+=("node$i"); break;;
-                    [Nn]* ) break;;
-                    * ) echo "Please answer y or n.";;
-                esac
-            done
-        done
-        
-        # Confirm at least one storage node was selected
-        if [ ${#storage_nodes[@]} -eq 0 ]; then
-            print_error "At least one storage node must be selected for Rook-Ceph"
-            while true; do
-                echo -n -e "${BLUE}[?]${NC} Continue with Rook-Ceph setup? [y/n]: "
-                read -r response
-                case $response in
-                    [Yy]* ) 
-                        # Ask for at least one node again
-                        for i in $(seq 1 $num_nodes); do
-                            node_ip=$(echo ${nodes[$i-1]} | cut -d'|' -f1)
-                            while true; do
-                                echo -n -e "${BLUE}[?]${NC} Use node$i ($node_ip) for persistent storage? [y/n]: "
-                                read -r response
-                                case $response in
-                                    [Yy]* ) storage_nodes+=("node$i"); break;;
-                                    [Nn]* ) break;;
-                                    * ) echo "Please answer y or n.";;
-                                esac
-                            done
-                            # Break out once at least one node is selected
-                            if [ ${#storage_nodes[@]} -gt 0 ]; then
-                                break
-                            fi
-                        done
-                        break;;
-                    [Nn]* ) 
-                        print_warning "Continuing without Rook-Ceph configuration"
-                        SELECTED_ROOK_CEPH=false
-                        break;;
-                    * ) echo "Please answer y or n.";;
-                esac
-            done
-        fi
-        
-        # Only continue if Rook-Ceph is still selected
-        if $SELECTED_ROOK_CEPH; then
-            # Get storage device information
-            device_names=$(get_input "What are the device names to use (e.g., sd*, nvme*)?" "nvme*" "[a-zA-Z0-9*]+")
-            osds_per_device=$(get_input "How many OSDs per device?" "1" "^[0-9]+$")
-            
-            # Storage device type selection
-            while true; do
-                echo -n -e "${BLUE}[?]${NC} What type of storage device (hdd/ssd/nvme)? [nvme]: "
-                read -r response
-                case $response in
-                    hdd|ssd|nvme) storage_device_type=$response; break;;
-                    "") storage_device_type="nvme"; break;;
-                    * ) echo "Please answer hdd, ssd, or nvme.";;
-                esac
-            done
-            
-            # ZFS Configuration
-            while true; do
-                echo -n -e "${BLUE}[?]${NC} Do your worker nodes use ZFS for ephemeral storage? [y/n]: "
-                read -r response
-                case $response in
-                    [Yy]* ) zfs_for_ephemeral="true"; break;;
-                    [Nn]* ) zfs_for_ephemeral="false"; break;;
-                    * ) echo "Please answer y or n.";;
-                esac
-            done
-            
-            # Create Rook-Ceph defaults file
-            mkdir -p ~/provider-playbooks/roles/rook-ceph/defaults
-
-            # Note: CSI driver directories will be created after SSH key setup is complete
-
-            # Determine MON and MGR counts based on number of storage nodes
-            if [ ${#storage_nodes[@]} -eq 1 ]; then
-                mon_count=1
-                mgr_count=1
-                pool_size=$((osds_per_device + 1))
-                min_size=2
-                failure_domain="osd"
-            elif [ ${#storage_nodes[@]} -eq 2 ]; then
-                mon_count=2
-                mgr_count=2
-                pool_size=2
-                min_size=2
-                failure_domain="osd"
-            else
-                mon_count=3
-                mgr_count=2
-                pool_size=3
-                min_size=2
-                failure_domain="host"
-            fi
-
-            # Determine storage class based on device type
-            if [ "$storage_device_type" == "ssd" ]; then
-                storage_class="beta2"
-            elif [ "$storage_device_type" == "nvme" ]; then
-                storage_class="beta3"
-            else
-                storage_class="beta1"
-            fi
-
-            # Create the nodes list with proper formatting
-            nodes_list=""
-            for node in "${storage_nodes[@]}"; do
-                if [ -z "$nodes_list" ]; then
-                    nodes_list="  - name: \"$node\"
-    config:"
-                else
-                    nodes_list="$nodes_list
-  - name: \"$node\"
-    config:"
                 fi
             done
-
-            cat > ~/provider-playbooks/roles/rook-ceph/defaults/main.yaml << EOF
-rook_ceph_namespace: rook-ceph
-rook_ceph_version: "1.18.7"
-
-# Ceph cluster configuration
-pool_size: $pool_size
-min_size: $min_size
-mon_count: $mon_count
-mgr_count: $mgr_count
-
-# Storage configuration
-config:
-  osdsPerDevice: "$osds_per_device"
-nodes:
-$nodes_list
-
-# Storage configuration
-device_filter: "$device_names"
-osds_per_device: $osds_per_device
-device_type: "$storage_device_type"
-failure_domain: "$failure_domain"
-storage_class: "$storage_class"
-zfs_for_ephemeral: "$zfs_for_ephemeral"
-kubelet_dir_path: "$kubelet_dir_path"
-
-# Node configuration
-storage_nodes: [${storage_nodes[*]}]
-EOF
-
-             # Create host_vars for storage nodes
-            for node in "${storage_nodes[@]}"; do
-                mkdir -p /root/provider-playbooks/host_vars
-                if [ -f "/root/provider-playbooks/host_vars/${node}.yml" ]; then
-                    # If file exists, append to it
-                    cat >> "/root/provider-playbooks/host_vars/${node}.yml" << EOF
-
-# Rook-Ceph Storage Configuration
-rook_ceph_kubelet_dir_path: "$kubelet_dir_path"
-rook_ceph_storage:
-  device_names: "$device_names"
-  osds_per_device: $osds_per_device
-  device_type: "$storage_device_type"
-  zfs_for_ephemeral: "$zfs_for_ephemeral"
-EOF
-                else
-                    # Create new file
-                    cat > "/root/provider-playbooks/host_vars/${node}.yml" << EOF
-# Node Configuration - Rook-Ceph Storage
-
-rook_ceph_kubelet_dir_path: "$kubelet_dir_path"
-rook_ceph_storage:
-  device_names: "$device_names"
-  osds_per_device: $osds_per_device
-  device_type: "$storage_device_type"
-  zfs_for_ephemeral: "$zfs_for_ephemeral"
-EOF
-                fi
+            if [[ -z $candidate_index ]]; then
+                warn "Choose a node name exactly as shown above."
+            elif [[ " ${KUBERNETES_NODE_NAMES[*]:-} " == *" ${cluster_names[$candidate_index]} "* ]]; then
+                warn "That Kubernetes node is already assigned to another configured host."
+                candidate_index=
+            fi
+        done
+        if $INSTALL_ROOK; then
+            storage_label_count=0
+            for hostname_label in "${cluster_storage_names[@]}"; do
+                [[ $hostname_label == "${cluster_storage_names[$candidate_index]}" ]] && \
+                    storage_label_count=$((storage_label_count + 1))
             done
-            
-            print_status "Rook-Ceph configuration saved"
-            print_warning "Please ensure your storage nodes have the specified devices available"
-        fi
-    fi
-fi
-
-# Get Tailscale auth key if Tailscale is selected
-if $SELECTED_TAILSCALE; then
-    print_status "Tailscale Setup:"
-    read -p "Enter your Tailscale auth key: " tailscale_authkey
-    echo "Using Tailscale auth key: ${tailscale_authkey:0:8}..."
-    
-    # Create host_vars directory if it doesn't exist
-    mkdir -p /root/provider-playbooks/host_vars
-    
-    # Update node1.yml with Tailscale configuration if it exists
-    if [ -f "/root/provider-playbooks/host_vars/node1.yml" ]; then
-        # If the file exists, check if tailscale_authkey is already set
-        if ! grep -q "tailscale_authkey:" "/root/provider-playbooks/host_vars/node1.yml"; then
-            # Add Tailscale configuration if it doesn't exist
-            cat >> "/root/provider-playbooks/host_vars/node1.yml" << EOF
-
-## Tailscale Configuration
-tailscale_hostname: "node1-$(echo "${provider_name}" | tr '.' '-')"
-tailscale_authkey: "${tailscale_authkey}"
-EOF
-        else
-            # Update existing Tailscale configuration
-            sed -i "s|tailscale_authkey:.*|tailscale_authkey: \"${tailscale_authkey}\"|" "/root/provider-playbooks/host_vars/node1.yml"
-        fi
-    fi
-fi
-# Create necessary directories
-print_status "Creating required directories..."
-mkdir -p /root/provider-playbooks/host_vars
-mkdir -p /root/provider-playbooks/inventory/akash
-
-# Create inventory using Kubespray's inventory builder
-print_status "Creating inventory file using Kubespray's inventory builder..."
-# Copy the sample inventory contents
-print_status "Copying sample inventory contents..."
-cd ~/kubespray
-# Create the directory if it doesn't exist
-mkdir -p inventory/akash
-# Always copy the sample files to ensure we have the latest structure
-cp -rfp inventory/sample/* inventory/akash/
-print_status "Sample inventory copied successfully"
-
-# Ensure all required directories exist
-mkdir -p inventory/akash/group_vars/all
-mkdir -p inventory/akash/group_vars/k8s_cluster
-
-# Verify key files exist
-if [ ! -f inventory/akash/group_vars/k8s_cluster/k8s-cluster.yml ]; then
-    print_error "Failed to copy k8s-cluster.yml from sample inventory"
-    print_status "Creating a basic k8s-cluster.yml file"
-    cat > inventory/akash/group_vars/k8s_cluster/k8s-cluster.yml << EOF
-# Kubernetes configuration
-kube_network_plugin: calico
-container_manager: containerd
-EOF
-fi
-
-# Remove existing inventory file if it exists
-if [ -f ~/kubespray/inventory/akash/inventory.ini ]; then
-    print_status "Removing existing inventory file..."
-    rm -f ~/kubespray/inventory/akash/inventory.ini
-fi
-
-# Create the inventory file with the exact format needed
-print_status "Creating inventory file with node configuration..."
-cat > ~/kubespray/inventory/akash/inventory.ini << EOF
-# Kubespray inventory file for Akash Provider
-# Generated by setup_provider.sh
-
-[all]
-EOF
-
-# Add all nodes as hosts
-for i in "${!nodes[@]}"; do
-    node_num=$((i + 1))
-    node_ip=$(echo ${nodes[$i]} | cut -d'|' -f1)
-    node_user=$(echo ${nodes[$i]} | cut -d'|' -f2)
-    node_port=$(echo ${nodes[$i]} | cut -d'|' -f3)
-    
-    cat >> ~/kubespray/inventory/akash/inventory.ini << EOF
-node${node_num} ansible_host=${node_ip} ip=${node_ip} ansible_user=${node_user} ansible_port=${node_port}
-EOF
-done
-
-cat >> ~/kubespray/inventory/akash/inventory.ini << EOF
-
-[kube_control_plane]
-EOF
-
-# Special handling for 2 nodes: only node1 is control plane and etcd
-if [ "$num_nodes" -eq 2 ]; then
-    cat >> ~/kubespray/inventory/akash/inventory.ini << EOF
-node1 etcd_member_name=etcd1
-EOF
-else
-    # Add control plane nodes (first 3 nodes or all if less than 3)
-    for ((i=0; i<num_nodes && i<3; i++)); do
-        node_num=$((i + 1))
-        cat >> ~/kubespray/inventory/akash/inventory.ini << EOF
-node${node_num} etcd_member_name=etcd${node_num}
-EOF
-    done
-fi
-
-cat >> ~/kubespray/inventory/akash/inventory.ini << EOF
-
-[etcd:children]
-kube_control_plane
-
-[kube_node]
-EOF
-
-# Add all nodes as workers
-for i in "${!nodes[@]}"; do
-    node_num=$((i + 1))
-    cat >> ~/kubespray/inventory/akash/inventory.ini << EOF
-node${node_num}
-EOF
-done
-
-print_status "Inventory file created successfully"
-
-# Create a backup of the old format if it exists
-if [ -f ~/kubespray/inventory/akash/hosts.yaml ]; then
-    mv ~/kubespray/inventory/akash/hosts.yaml ~/kubespray/inventory/akash/hosts.yaml.bak
-    print_status "Created backup of old inventory format at ~/kubespray/inventory/akash/hosts.yaml.bak"
-fi
-
-# Return to provider-playbooks directory
-cd ~/provider-playbooks
-
-# Create host_vars files for each node
-print_status "Creating host variables files..."
-
-# Create host_vars for all nodes except node1 (which is handled by setup_wallet)
-for i in "${!nodes[@]}"; do
-    node_num=$((i + 1))
-    if [ "$node_num" != "1" ]; then
-        # Transform domain name for Tailscale hostname (replace dots with hyphens)
-        tailscale_domain=$(echo "${provider_name}" | tr '.' '-')
-        cat > "/root/provider-playbooks/host_vars/node${node_num}.yml" << EOF
-# Node Configuration - Host Vars File
-
-## Network Configuration
-region: "${provider_region}"
-
-## Organization Details
-host: "akash"
-organization: "${provider_organization}"
-
-## Tailscale Configuration
-tailscale_hostname: "node${node_num}-${tailscale_domain}"
-tailscale_authkey: "${tailscale_authkey}"
-EOF
-    fi
-done
-
-# Function to copy SSH key to a node
-copy_ssh_key() {
-    local node_ip=$1
-    local node_user=$2
-    local node_port=$3
-    local max_attempts=3
-    local attempt=1
-    
-    # First try with SSH key
-    print_status "Testing SSH key access for ${node_user}@${node_ip}..."
-    if ssh -o PasswordAuthentication=no -o StrictHostKeyChecking=no -p ${node_port} ${node_user}@${node_ip} exit &>/dev/null; then
-        print_status "SSH key access successful for ${node_user}@${node_ip}"
-        return 0
-    fi
-    
-    print_error "SSH key access failed for ${node_user}@${node_ip}"
-    
-    # Ask if user wants to try password authentication
-    read -p "Do you want to try password authentication? (y/n) " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        print_warning "Skipping automated SSH key setup"
-        if ! goto_manual_setup; then
-            print_error "SSH key setup failed. You may encounter issues with Ansible playbooks."
-            return 1
-        fi
-        return 0
-    fi
-    
-    # Try with password up to max_attempts times
-    while [ $attempt -le $max_attempts ]; do
-        print_status "Password attempt $attempt of $max_attempts"
-        read -s -p "Enter password for ${node_user}@${node_ip}: " node_password
-        echo
-        
-        if [ "$node_user" != "root" ]; then
-            print_status "Copying SSH key to root's authorized_keys via ${node_user}..."
-            # First copy the public key to a temporary file on the remote machine
-            if sshpass -p "${node_password}" ssh -o StrictHostKeyChecking=no -p ${node_port} ${node_user}@${node_ip} "mkdir -p ~/.ssh && cat > ~/.ssh/temp_key.pub" < ~/.ssh/id_rsa.pub; then
-                # Then use sudo to copy it to root's authorized_keys
-                if sshpass -p "${node_password}" ssh -o StrictHostKeyChecking=no -p ${node_port} ${node_user}@${node_ip} "sudo mkdir -p /root/.ssh && sudo cp ~/.ssh/temp_key.pub /root/.ssh/authorized_keys && sudo chmod 600 /root/.ssh/authorized_keys && rm ~/.ssh/temp_key.pub"; then
-                    print_status "Successfully copied SSH key to root's authorized_keys"
-                    return 0
-                fi
-            fi
-        else
-            # For root user, use normal ssh-copy-id with StrictHostKeyChecking=no
-            print_status "Using ssh-copy-id with StrictHostKeyChecking=no to copy key..."
-            if sshpass -p "${node_password}" ssh-copy-id -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa.pub -p ${node_port} ${node_user}@${node_ip}; then
-                print_status "Successfully copied SSH key"
-                return 0
+            if ((storage_label_count != 1)); then
+                die "Kubernetes hostname label ${cluster_storage_names[$candidate_index]} is not unique across the cluster; Rook device selection requires a unique label for every configured storage host."
             fi
         fi
-        
-        print_error "Password attempt $attempt failed"
-        attempt=$((attempt + 1))
+        if $INSTALL_ROOK && \
+            [[ " ${KUBERNETES_STORAGE_NODE_NAMES[*]:-} " == *" ${cluster_storage_names[$candidate_index]} "* ]]; then
+            die "Kubernetes nodes ${cluster_names[$candidate_index]} and another configured host share hostname label ${cluster_storage_names[$candidate_index]}; Rook storage nodes require unique hostname labels."
+        fi
+        KUBERNETES_NODE_NAMES+=("${cluster_names[$candidate_index]}")
+        KUBERNETES_STORAGE_NODE_NAMES+=("${cluster_storage_names[$candidate_index]}")
     done
-    
-    print_error "All password attempts failed"
-    # Call goto_manual_setup and return its status
-    if ! goto_manual_setup; then
-        print_error "SSH key setup failed. You may encounter issues with Ansible playbooks."
-        return 1
-    fi
-    return 0
 }
 
-# Function to show manual setup instructions
-goto_manual_setup() {
-    print_warning "Please set up SSH access manually using the following steps:"
-    echo
-    echo "1. Here is the SSH public key that needs to be added to the target machine:"
-    echo "---BEGIN SSH PUBLIC KEY---"
-    cat ~/.ssh/id_rsa.pub
-    echo "---END SSH PUBLIC KEY---"
-    echo
-    echo "2. On the target machine (${node_ip}), please add this key to the appropriate authorized_keys file:"
-    echo "   - For root user: /root/.ssh/authorized_keys"
-    echo "   - For non-root user: /home/${node_user}/.ssh/authorized_keys"
-    echo
-    echo "3. You can do this by running these commands on the target machine:"
-    echo "   mkdir -p /root/.ssh"
-    echo "   chmod 700 /root/.ssh"
-    echo "   echo 'PASTE_SSH_KEY_HERE' > /root/.ssh/authorized_keys"
-    echo "   chmod 600 /root/.ssh/authorized_keys"
-    echo
-    
-    # Add max attempts to prevent infinite loop
-    local max_attempts=3
-    local attempt=1
-    
-    # Keep trying until SSH key is verified, user gives up, or max attempts reached
-    while [ $attempt -le $max_attempts ]; do
-        read -p "Press Enter to verify SSH key setup (attempt $attempt/$max_attempts, or 'q' to quit): " response
-        if [[ "$response" == "q" ]]; then
-            print_error "SSH key setup verification cancelled"
-            return 1
-        fi
-        
-        # Try to SSH with the key and disable StrictHostKeyChecking
-        if ssh -o PasswordAuthentication=no -o StrictHostKeyChecking=no -p ${node_port} ${node_user}@${node_ip} exit &>/dev/null; then
-            print_status "SSH key verified successfully!"
-            return 0
-        else
-            print_error "SSH key verification failed. Please make sure the key was added correctly."
-            attempt=$((attempt + 1))
-            if [ $attempt -le $max_attempts ]; then
-                print_warning "Attempts remaining: $((max_attempts - attempt + 1))"
-            fi
-        fi
-    done
-    
-    print_error "Maximum verification attempts reached. Continuing without verification."
-    return 1
-}
-
-# Setup SSH key if not exists
-if [ ! -f ~/.ssh/id_rsa ]; then
-    print_status "Generating SSH key..."
-    ssh-keygen -t rsa -C "$(hostname)" -f "$HOME/.ssh/id_rsa" -P ""
-fi
-
-# Copy SSH key to all nodes
-print_status "Copying SSH key to all nodes..."
-for i in "${!nodes[@]}"; do
-    node_ip=$(echo ${nodes[$i]} | cut -d'|' -f1)
-    node_user=$(echo ${nodes[$i]} | cut -d'|' -f2)
-    node_port=$(echo ${nodes[$i]} | cut -d'|' -f3)
-    
-    # Remove the localhost check to treat all nodes as remote
-    print_status "Setting up SSH access for node${i}: ${node_user}@${node_ip}:${node_port}"
-    if ! copy_ssh_key "$node_ip" "$node_user" "$node_port"; then
-        print_error "Failed to set up SSH access for ${node_ip}. Please verify the connection details and try again."
-        exit 1
-    fi
-done
-
-# Create CSI driver directories for Rook-Ceph if selected (after SSH keys are verified)
-if $SELECTED_ROOK_CEPH && [ -n "${storage_nodes:-}" ]; then
-    print_status "Creating CSI driver directories on storage nodes..."
-    for node in "${storage_nodes[@]}"; do
-        # Extract node number from the node name (e.g., "node1" -> "1")
-        node_num=${node#node}
-        # Get node info from the nodes array (subtract 1 because array is 0-based)
-        node_info=${nodes[$((node_num-1))]}
-        node_ip=$(echo "$node_info" | cut -d'|' -f1)
-        node_user=$(echo "$node_info" | cut -d'|' -f2)
-        node_port=$(echo "$node_info" | cut -d'|' -f3)
-        
-        print_status "Creating directories on ${node} (${node_ip})..."
-        # Create the necessary directories for CSI driver
-        if ssh -o StrictHostKeyChecking=no -p ${node_port} ${node_user}@${node_ip} "mkdir -p $kubelet_dir_path/plugins $kubelet_dir_path/pods $kubelet_dir_path/plugins_registry"; then
-            # Ensure proper permissions
-            ssh -o StrictHostKeyChecking=no -p ${node_port} ${node_user}@${node_ip} "chmod 755 $kubelet_dir_path $kubelet_dir_path/plugins $kubelet_dir_path/pods $kubelet_dir_path/plugins_registry"
-            print_status "CSI directories created successfully on ${node}"
-        else
-            print_error "Failed to create CSI directories on ${node}"
-            exit 1
-        fi
-    done
-fi
-
-# Clone provider-playbooks if not exists
-print_status "Created new cluster.yml configuration"
-
-# Configure Ephemeral Storage
-print_status "Configuring Ephemeral Storage..."
-mkdir -p "${containerd_dir_path}" "${kubelet_dir_path}"
-
-K8S_CLUSTER_FILE=~/kubespray/inventory/akash/group_vars/k8s_cluster/k8s-cluster.yml
-containerd_present=false
-kubelet_present=false
-
-if grep -q "^containerd_storage_dir:" "$K8S_CLUSTER_FILE"; then
-    sed -i "s|^containerd_storage_dir:.*|containerd_storage_dir: \"${containerd_dir_path}\"|" "$K8S_CLUSTER_FILE"
-    containerd_present=true
-fi
-
-if grep -q "^kubelet_custom_flags:" "$K8S_CLUSTER_FILE"; then
-    # Use yq to set kubelet_custom_flags as a list (required format for Kubespray v2.27+)
-    yq eval ".kubelet_custom_flags = [\"--root-dir=${kubelet_dir_path}\"]" -i "$K8S_CLUSTER_FILE"
-    kubelet_present=true
-fi
-
-if [ "$containerd_present" = false ] && [ "$kubelet_present" = false ]; then
-    cat >> "$K8S_CLUSTER_FILE" << EOF
-
-# Ephemeral storage configuration
-containerd_storage_dir: "${containerd_dir_path}"
-kubelet_custom_flags:
-  - "--root-dir=${kubelet_dir_path}"
-EOF
-elif [ "$containerd_present" = false ]; then
-    cat >> "$K8S_CLUSTER_FILE" << EOF
-
-containerd_storage_dir: "${containerd_dir_path}"
-EOF
-elif [ "$kubelet_present" = false ]; then
-    cat >> "$K8S_CLUSTER_FILE" << EOF
-
-kubelet_custom_flags:
-  - "--root-dir=${kubelet_dir_path}"
-EOF
-fi
-
-# Configure Scheduler Profiles
-print_status "Configuring Scheduler Profiles..."
-if grep -q "kube_scheduler_profiles" ~/kubespray/inventory/akash/group_vars/k8s_cluster/k8s-cluster.yml; then
-    print_status "Scheduler profiles already configured"
-else
-    cat >> ~/kubespray/inventory/akash/group_vars/k8s_cluster/k8s-cluster.yml << EOF
-
-# Scheduler profiles
-kube_scheduler_profiles:
-  - pluginConfig:
-    - name: NodeResourcesFit
-      args:
-        scoringStrategy:
-          type: MostAllocated
-          resources:
-            - name: nvidia.com/gpu
-              weight: 10
-            - name: memory
-              weight: 1
-            - name: cpu
-              weight: 1
-            - name: ephemeral-storage
-              weight: 1
-EOF
-fi
-
-# Enable Helm Installation
-print_status "Enabling Helm Installation..."
-if [ ! -f ~/kubespray/inventory/akash/group_vars/k8s_cluster/addons.yml ]; then
-    cat > ~/kubespray/inventory/akash/group_vars/k8s_cluster/addons.yml << EOF
-# Helm deployment
-helm_enabled: true
-EOF
-else
-    sed -i 's/helm_enabled: false/helm_enabled: true/' ~/kubespray/inventory/akash/group_vars/k8s_cluster/addons.yml
-fi
-
-# Configure NVIDIA Runtime
-print_status "Configuring NVIDIA Runtime for containerd..."
-mkdir -p ~/kubespray/inventory/akash/group_vars/all
-cat > ~/kubespray/inventory/akash/group_vars/all/akash.yml << EOF
-# This file configures the NVIDIA container runtime for GPU-enabled nodes
-# The runtime will only be used for workloads requesting it
-
-containerd_additional_runtimes:
-  - name: nvidia
-    type: "io.containerd.runc.v2"
-    engine: ""
-    root: ""
-    options:
-      BinaryName: '/usr/bin/nvidia-container-runtime'
-EOF
-
-# Configure Rook-Ceph in k8s-cluster.yml
-if $SELECTED_ROOK_CEPH; then
-    print_status "Configuring Rook-Ceph settings in k8s-cluster.yml..."
-    if ! grep -q "rook_ceph_enabled" ~/kubespray/inventory/akash/group_vars/k8s_cluster/k8s-cluster.yml; then
-        cat >> ~/kubespray/inventory/akash/group_vars/k8s_cluster/k8s-cluster.yml << EOF
-
-# Rook-Ceph configuration
-rook_ceph_enabled: true
-rook_ceph_namespace: "rook-ceph"
-rook_ceph_version: "1.16.6"
-EOF
-    fi
-fi
-
-print_status "Configuring DNS..."
-
-DNS_FILE=~/kubespray/inventory/akash/group_vars/all/all.yml
-
-# 1. Uncomment the upstream_dns_servers line
-sed -i 's/^[[:space:]]*#\s*upstream_dns_servers:/upstream_dns_servers:/' "$DNS_FILE"
-
-# 2. Uncomment any lines containing 8.8.8.8 or 8.8.4.4
-sed -i 's/^[[:space:]]*#\s*-\s*8\.8\.8\.8/  - 8.8.8.8/' "$DNS_FILE"
-sed -i 's/^[[:space:]]*#\s*-\s*8\.8\.4\.4/  - 8.8.4.4/' "$DNS_FILE"
-
-# 3. Add 1.1.1.1 if it's not already present (commented or not)
-if ! grep -qE '^\s*- 1\.1\.1\.1' "$DNS_FILE"; then
-    # Add it right below upstream_dns_servers:
-    awk '/upstream_dns_servers:/ { print; print "  - 1.1.1.1"; next }1' "$DNS_FILE" > "${DNS_FILE}.tmp" && mv "${DNS_FILE}.tmp" "$DNS_FILE"
-    print_status "Added 1.1.1.1 to upstream DNS list"
-else
-    print_status "1.1.1.1 already present in upstream DNS list"
-fi
-
-
-print_status "All configuration steps completed successfully!"
-
-# Print next steps
-print_status "Initial setup complete! Now proceeding with wallet setup..."
-
-# After verifying hosts configuration
-print_status "Hosts configuration verified"
-
-# Run the playbook
-print_status "Running playbooks based on your selections..."
-
-# Initialize TLS SAN variable
-TAILSCALE_TLS_SAN=""
-
-# If both Tailscale and Kubernetes are selected, install Tailscale first to get the IP for TLS SAN
-if $SELECTED_TAILSCALE && $SELECTED_KUBERNETES; then
-    print_status "Installing Tailscale on all nodes first to configure TLS SAN for Kubernetes API server..."
-    
-    # Ensure we're in the provider-playbooks directory
-    cd ~/provider-playbooks
-    
-    # Activate the virtual environment
-    source ~/kubespray/venv/bin/activate
-    
-    # Run Tailscale playbook on all nodes
-    print_status "Running Tailscale playbook on all nodes..."
-    ansible-playbook -i ~/kubespray/inventory/akash/inventory.ini playbooks.yml -t tailscale -v
-    
-    # Get the Tailscale IP from the first control plane node
-    print_status "Retrieving Tailscale IP address from control plane node..."
-    NODE_IP=$(grep "^node1 " ~/kubespray/inventory/akash/inventory.ini | awk '{for(i=1;i<=NF;i++) if($i ~ /^ansible_host=/) print $i}' | cut -d'=' -f2)
-    NODE_USER=$(grep "^node1 " ~/kubespray/inventory/akash/inventory.ini | awk '{for(i=1;i<=NF;i++) if($i ~ /^ansible_user=/) print $i}' | cut -d'=' -f2)
-    NODE_PORT=$(grep "^node1 " ~/kubespray/inventory/akash/inventory.ini | awk '{for(i=1;i<=NF;i++) if($i ~ /^ansible_port=/) print $i}' | cut -d'=' -f2)
-    
-    # Default to root if not specified
-    NODE_USER=${NODE_USER:-root}
-    NODE_PORT=${NODE_PORT:-22}
-    
-    # Get Tailscale IP from control plane node
-    TAILSCALE_TLS_SAN=$(ssh -o StrictHostKeyChecking=no -p ${NODE_PORT} ${NODE_USER}@${NODE_IP} "tailscale ip -4" 2>/dev/null | tr -d '\n')
-    
-    if [ -n "$TAILSCALE_TLS_SAN" ] && validate_ip "$TAILSCALE_TLS_SAN"; then
-        print_status "Tailscale IP retrieved from control plane: ${TAILSCALE_TLS_SAN}"
-        print_status "This IP will be added to the Kubernetes API server TLS certificate"
-    else
-        print_warning "Failed to retrieve Tailscale IP. TLS SAN will use default configuration."
-        TAILSCALE_TLS_SAN=""
-    fi
-fi
-
-# Run Kubernetes installation if selected
-if $SELECTED_KUBERNETES; then
-  if $SELECTED_KUBESPRAY; then
-    print_status "Running Kubespray to set up Kubernetes cluster..."
-
-    # 1. Desired locations (your RAID-backed /data mount)
-    imagefs_dir_path="${containerd_dir_path}"
-    # kubelet_dir_path already set earlier based on user input
-
-    # 2. Inject the vars
-    KUBESPRAY_DIR=~/kubespray
-    INVENTORY_DIR="${KUBESPRAY_DIR}/inventory/akash"
-
-    mkdir -p "${INVENTORY_DIR}/group_vars/all"
-    mkdir -p "${INVENTORY_DIR}/group_vars/k8s_cluster"
-
-
-    cat > "${INVENTORY_DIR}/group_vars/all/containerd.yml" <<EOF
-containerd_storage_dir: "${containerd_dir_path}"
-containerd_sandbox_image: "registry.k8s.io/pause:3.10"
-EOF
-
-    # Add TLS SAN configuration if Tailscale IP is available
-    if [ -n "$TAILSCALE_TLS_SAN" ]; then
-        cat > "${INVENTORY_DIR}/group_vars/k8s_cluster/k8s-cluster.yml" <<EOF
-containerd_storage_dir: "${containerd_dir_path}"
-
-# Kubelet custom flags for ephemeral storage
-kubelet_custom_flags:
-  - "--root-dir=${kubelet_dir_path}"
-
-# Additional TLS SANs for API server certificate
-supplementary_addresses_in_ssl_keys:
-  - ${TAILSCALE_TLS_SAN}
-EOF
-        print_status "Set containerd_storage_dir to ${containerd_dir_path}"
-        print_status "Set kubelet --root-dir to ${kubelet_dir_path}"
-        print_status "Added Tailscale IP (${TAILSCALE_TLS_SAN}) to API server TLS certificate SANs"
-    else
-        cat > "${INVENTORY_DIR}/group_vars/k8s_cluster/k8s-cluster.yml" <<EOF
-containerd_storage_dir: "${containerd_dir_path}"
-
-# Kubelet custom flags for ephemeral storage
-kubelet_custom_flags:
-  - "--root-dir=${kubelet_dir_path}"
-EOF
-        print_status "Set containerd_storage_dir to ${containerd_dir_path}"
-        print_status "Set kubelet --root-dir to ${kubelet_dir_path}"
-    fi
-
-    # 3. Run Kubespray
-    cd "${KUBESPRAY_DIR}"
-    ansible-playbook -i inventory/akash/inventory.ini cluster.yml -b -v
-  else
-    print_status "Running K3s installation..."
-    
-    # Simple and direct approach - force add internal_ip to host_vars files
-    print_status "Adding internal_ip to host_vars files..."
-    NODE_IP=$(grep "^node1 " ~/kubespray/inventory/akash/inventory.ini | awk '{for(i=1;i<=NF;i++) if($i ~ /^ansible_host=/) print $i}' | cut -d'=' -f2)
-    
-    # Ensure host_vars directory exists
-    mkdir -p ~/provider-playbooks/host_vars
-    
-    # Simply force append the variable to each file
-    for i in $(seq 1 $(grep -c "^node[0-9]* " ~/kubespray/inventory/akash/inventory.ini)); do
-        NODE_NAME="node$i"
-        # Add K3s specific variables including TLS SAN if Tailscale IP is available
-        if [ -n "$TAILSCALE_TLS_SAN" ]; then
-            echo -e "\n# K3s specific variables\ninternal_ip: \"$NODE_IP\"\nk3s_data_dir: \"$k3s_data_dir\"\ntls_san: \"$TAILSCALE_TLS_SAN\"" >> ~/provider-playbooks/host_vars/${NODE_NAME}.yml
-            print_status "Added internal_ip, k3s_data_dir, and tls_san (${TAILSCALE_TLS_SAN}) to host_vars file for $NODE_NAME"
-        else
-            echo -e "\n# K3s specific variables\ninternal_ip: \"$NODE_IP\"\nk3s_data_dir: \"$k3s_data_dir\"" >> ~/provider-playbooks/host_vars/${NODE_NAME}.yml
-            print_status "Added internal_ip and k3s_data_dir to host_vars file for $NODE_NAME"
-        fi
-    done
-    
-    ansible-playbook -i ~/kubespray/inventory/akash/inventory.ini playbooks.yml -t k3s -v --extra-vars "k3s_data_dir=${k3s_data_dir}"
-fi
-else
-    print_status "Skipping Kubernetes installation as it was not selected"
-    print_status "Note: Make sure you have a working Kubernetes cluster before proceeding"
-fi
-
-# Install local-path-provisioner for storage (only if Rook-Ceph is not selected)
-if $SELECTED_KUBERNETES && $SELECTED_KUBESPRAY && ! $SELECTED_ROOK_CEPH; then
-    print_status "Installing local-path-provisioner (required by Akash provider)..."
-
-    # Wait for cluster to be ready
-    print_status "Waiting for Kubernetes cluster to be ready..."
-    sleep 10
-
-    # Install the provisioner
-    if kubectl apply -f https://raw.githubusercontent.com/rancher/local-path-provisioner/master/deploy/local-path-storage.yaml; then
-        print_status "local-path-provisioner installed successfully"
-
-        # Wait for it to be ready
-        print_status "Waiting for provisioner to be ready..."
-        kubectl wait --for=condition=ready pod -l app=local-path-provisioner -n local-path-storage --timeout=120s || print_warning "Timeout waiting, but continuing..."
-
-        print_status "Storage provisioner is ready"
-        
-        # Patch StorageClass to use Immediate binding mode
-        # This prevents issues with single-node clusters where WaitForFirstConsumer causes deadlocks
-        print_status "Configuring StorageClass for immediate volume binding..."
-        if kubectl patch storageclass local-path -p '{"volumeBindingMode":"Immediate"}' 2>/dev/null; then
-            print_status "StorageClass configured successfully"
-        else
-            print_warning "Failed to patch StorageClass - provider may have issues in single-node setups"
-        fi
-    else
-        print_error "Failed to install local-path-provisioner - provider deployment may fail!"
-        exit 1
-    fi
-elif $SELECTED_KUBERNETES && $SELECTED_KUBESPRAY && $SELECTED_ROOK_CEPH; then
-    print_status "Rook-Ceph selected - skipping local-path-provisioner installation"
-elif $SELECTED_KUBERNETES && $SELECTED_K3S; then
-    print_status "K3s includes local-path-provisioner by default - skipping installation"
-    
-    # Patch K3s StorageClass to use Immediate binding mode
-    print_status "Configuring K3s StorageClass for immediate volume binding..."
-    if kubectl patch storageclass local-path -p '{"volumeBindingMode":"Immediate"}' 2>/dev/null; then
-        print_status "StorageClass configured successfully"
-    else
-        print_warning "Failed to patch StorageClass - provider may have issues in single-node setups"
-    fi
-fi
-
-# Run provider playbooks if any are selected
-if $SELECTED_OS || $SELECTED_GPU || $SELECTED_PROVIDER || $SELECTED_TAILSCALE || $SELECTED_ROOK_CEPH; then
-    # Ensure we're in the provider-playbooks directory
-    cd ~/provider-playbooks
-    
-    # Activate the virtual environment
-    source ~/kubespray/venv/bin/activate
-    
-    # Check if K3s is running on node1
-    NODE_IP=$(grep "^node1 " ~/kubespray/inventory/akash/inventory.ini | awk '{for(i=1;i<=NF;i++) if($i ~ /^ansible_host=/) print $i}' | cut -d'=' -f2)
-    K3S_STATUS=$(ssh -o StrictHostKeyChecking=no root@${NODE_IP} "systemctl is-active k3s 2>&1")
-    if [ "$K3S_STATUS" = "active" ]; then
-        print_status "K3s is running on node1, setting up kubeconfig..."
-        
-        # Create .kube directory if it doesn't exist
-        mkdir -p /root/.kube
-        
-        # Create symlink to k3s.yaml
-        ln -sf /etc/rancher/k3s/k3s.yaml /root/.kube/config
-        
-        # Set KUBECONFIG
-        export KUBECONFIG=/root/.kube/config
-        
-        # Verify kubeconfig
-        if ! kubectl get nodes; then
-            print_error "Failed to verify kubeconfig. Please check the configuration."
-            exit 1
-        fi
-    else
-        print_status "K3s is not running on node1, skipping kubeconfig setup"
-    fi
-    
-    # Run OS playbook if selected
-    if $SELECTED_OS; then
-        print_status "Running OS configuration playbook..."
-        ansible-playbook -i ~/kubespray/inventory/akash/inventory.ini playbooks.yml -t os -v
-    fi
-    
-    # Run GPU playbook if selected
-    if $SELECTED_GPU; then
-        print_status "Running GPU configuration playbook..."
-        print_status "GPU Type: ${GPU_TYPE}"
-        ansible-playbook -i ~/kubespray/inventory/akash/inventory.ini playbooks.yml -t gpu -v --extra-vars "nvidia_driver_type=${GPU_TYPE}"
-    fi
-    
-    # Run Rook-Ceph playbook if selected (must run before Provider to create /root/provider directory)
-    if $SELECTED_ROOK_CEPH; then
-        print_status "Running Rook-Ceph playbook..."
-        # Determine the base path for rook data directory
-        if [[ "$kubelet_dir_path" == /data/* ]]; then
-            rook_data_dir="/data/rook"
-        else
-            rook_data_dir="/var/lib/rook"
-        fi
-        ansible-playbook -i ~/kubespray/inventory/akash/inventory.ini playbooks.yml -t rook-ceph -v --extra-vars "rook_ceph_data_dir=${rook_data_dir}" --extra-vars "kubelet_dir_path=${kubelet_dir_path}"
-    fi
-    
-    # Run Provider playbook if selected
-    if $SELECTED_PROVIDER; then
-        print_status "Running Provider playbook..."
-        ansible-playbook -i ~/kubespray/inventory/akash/inventory.ini playbooks.yml -t provider -v
-    fi
-    
-    # Run Tailscale playbook if selected (skip if already installed with Kubernetes)
-    if $SELECTED_TAILSCALE; then
-        if [ -n "$TAILSCALE_TLS_SAN" ]; then
-            # Tailscale was already installed on all nodes for TLS SAN configuration
-            print_status "Tailscale already installed on all nodes"
-        else
-            # Tailscale wasn't installed yet (Kubernetes wasn't selected), install on all nodes
-            print_status "Running Tailscale playbook..."
-            ansible-playbook -i ~/kubespray/inventory/akash/inventory.ini playbooks.yml -t tailscale -v
-        fi
-    fi
-else
-    print_status "No provider playbooks were selected to run"
-fi
-
-# Check if all playbooks completed successfully
-print_status "Checking if all playbooks completed successfully..."
-
-# Function to reboot nodes in reverse order
-reboot_nodes() {
-    print_status "Rebooting nodes in reverse order..."
-    
-    # Get the number of nodes
-    local num_nodes=${#nodes[@]}
-    
-    # Reboot nodes in reverse order
-    for ((i=num_nodes-1; i>=0; i--)); do
-        node_num=$((i + 1))
-        node_ip=$(echo ${nodes[$i]} | cut -d'|' -f1)
-        node_user=$(echo ${nodes[$i]} | cut -d'|' -f2)
-        node_port=$(echo ${nodes[$i]} | cut -d'|' -f3)
-        
-        print_status "Rebooting node${node_num} (${node_user}@${node_ip}:${node_port})..."
-        ssh -o StrictHostKeyChecking=no -p ${node_port} ${node_user}@${node_ip} "reboot" || print_warning "Failed to reboot node${node_num}, but continuing with other nodes"
-        
-        # Wait a moment before proceeding to the next node
-        sleep 2
-    done
-    
-    print_status "All nodes have been sent reboot commands"
-    print_warning "The nodes will reboot in sequence. You may need to wait a few minutes before they are all back online."
-}
-
-# Ask user if they want to reboot all nodes
-while true; do
-    echo -n -e "${BLUE}[?]${NC} Would you like to reboot all nodes now? [y/n]: "
-    read -r response
-    case $response in
-        [Yy]* ) 
-            reboot_nodes
-            break
-            ;;
-        [Nn]* ) 
-            print_status "Skipping node reboot"
-            break
-            ;;
-        * ) echo "Please answer y or n.";;
+is_valid_location_region() {
+    case "$1" in
+        na-ca-west|na-ca-central|na-ca-prairie|na-ca-atlantic|na-ca-north|\
+        na-us-west|na-us-southwest|na-us-midwest|na-us-southeast|na-us-northeast|\
+        central-america|caribbean|sa-north|sa-west|sa-south|sa-brazil|\
+        eu-central|eu-east|eu-north|eu-southeast|eu-south|eu-southwest|eu-west|\
+        af-east|af-middle|af-north|af-south|af-west|\
+        as-central|as-east|as-southeast|as-south|as-west|\
+        oc-aus|oc-nz|oc-mel|oc-mic|oc-pol) return 0 ;;
+        *) return 1 ;;
     esac
-done
+}
 
-print_status "Setup process completed!"
-print_status "Thank you for using the Akash Provider Setup Script!"
+map_location_country() {
+    local area=$1 country=${2^^}
+    LOCATION_REGION=
+    case "$area:$country" in
+        central:BZ|central:CR|central:SV|central:GT|central:HN|central:NI|central:PA)
+            LOCATION_REGION=central-america ;;
+        central:AI|central:AG|central:AW|central:BS|central:BB|central:BQ|central:VG|central:KY|\
+        central:CU|central:CW|central:DM|central:DO|central:GD|central:GP|central:HT|central:JM|\
+        central:MQ|central:MS|central:PR|central:BL|central:KN|central:LC|central:MF|central:VC|\
+        central:SX|central:TT|central:TC|central:VI)
+            LOCATION_REGION=caribbean ;;
+        south-america:CO|south-america:VE|south-america:GY|south-america:SR|south-america:GF)
+            LOCATION_REGION=sa-north ;;
+        south-america:PE|south-america:EC|south-america:BO) LOCATION_REGION=sa-west ;;
+        south-america:AR|south-america:UY|south-america:CL|south-america:PY) LOCATION_REGION=sa-south ;;
+        south-america:BR) LOCATION_REGION=sa-brazil ;;
+        europe:SI|europe:HU|europe:SK|europe:PL|europe:CZ|europe:AT|europe:CH|europe:DE)
+            LOCATION_REGION=eu-central ;;
+        europe:MD|europe:UA|europe:BY|europe:LT|europe:LV|europe:EE|europe:RU) LOCATION_REGION=eu-east ;;
+        europe:DK|europe:SE|europe:NO|europe:FI|europe:IS) LOCATION_REGION=eu-north ;;
+        europe:AL|europe:MK|europe:BG|europe:RO|europe:RS|europe:XK|europe:ME|europe:BA|europe:HR)
+            LOCATION_REGION=eu-southeast ;;
+        europe:IT|europe:GR) LOCATION_REGION=eu-south ;;
+        europe:PT|europe:ES|europe:AD) LOCATION_REGION=eu-southwest ;;
+        europe:FR|europe:LU|europe:BE|europe:NL|europe:GB|europe:IE) LOCATION_REGION=eu-west ;;
+        africa:MZ|africa:ZW|africa:ZM|africa:MW|africa:TZ|africa:BI|africa:RW|africa:KE|\
+        africa:UG|africa:SO|africa:ET|africa:DJ|africa:ER|africa:SS) LOCATION_REGION=af-east ;;
+        africa:TD|africa:CF|africa:CM|africa:GQ|africa:GA|africa:CG|africa:CD|africa:AO)
+            LOCATION_REGION=af-middle ;;
+        africa:EH|africa:MA|africa:DZ|africa:TN|africa:LY|africa:EG|africa:SD) LOCATION_REGION=af-north ;;
+        africa:NA|africa:BW|africa:ZA|africa:LS|africa:SZ) LOCATION_REGION=af-south ;;
+        africa:MR|africa:ML|africa:NE|africa:NG|africa:BJ|africa:TG|africa:GH|africa:BF|\
+        africa:CI|africa:LR|africa:GN|africa:SL|africa:GW|africa:GM|africa:SN) LOCATION_REGION=af-west ;;
+        asia:KZ|asia:KG|asia:TJ|asia:TM|asia:UZ) LOCATION_REGION=as-central ;;
+        asia:CN|asia:JP|asia:KP|asia:KR|asia:MN|asia:HK|asia:MO|asia:TW) LOCATION_REGION=as-east ;;
+        asia:MM|asia:LA|asia:TH|asia:VN|asia:KH|asia:MY|asia:SG|asia:ID|asia:TL|asia:PH)
+            LOCATION_REGION=as-southeast ;;
+        asia:IR|asia:AF|asia:PK|asia:IN|asia:BD|asia:BT|asia:NP|asia:LK|asia:MV)
+            LOCATION_REGION=as-south ;;
+        asia:TR|asia:GE|asia:AM|asia:AZ|asia:SY|asia:LB|asia:JO|asia:IL|asia:IQ|asia:KW|\
+        asia:SA|asia:YE|asia:OM|asia:AE|asia:QA|asia:BH|asia:CY|asia:PS) LOCATION_REGION=as-west ;;
+        oceania:AU) LOCATION_REGION=oc-aus ;;
+        oceania:NZ) LOCATION_REGION=oc-nz ;;
+        oceania:PG|oceania:NR|oceania:SB|oceania:VU|oceania:NC|oceania:FJ) LOCATION_REGION=oc-mel ;;
+        oceania:PW|oceania:MP|oceania:GU|oceania:FM|oceania:MH|oceania:KI) LOCATION_REGION=oc-mic ;;
+        oceania:TV|oceania:WF|oceania:TK|oceania:AS|oceania:TO|oceania:NU|oceania:CK|\
+        oceania:PF|oceania:PN) LOCATION_REGION=oc-pol ;;
+        *) return 1 ;;
+    esac
+    LOCATION_COUNTRY=$country
+}
+
+map_north_america_subdivision() {
+    local country=${1^^} subdivision=${2^^}
+    case "$country:$subdivision" in
+        US:CA|US:OR|US:WA|US:ID|US:MT|US:WY|US:UT|US:CO|US:NV|US:AK|US:HI) LOCATION_REGION=na-us-west ;;
+        US:AZ|US:NM|US:TX|US:OK) LOCATION_REGION=na-us-southwest ;;
+        US:ND|US:SD|US:NE|US:KS|US:MN|US:IA|US:MO|US:WI|US:IL|US:MI|US:IN|US:OH) LOCATION_REGION=na-us-midwest ;;
+        US:AR|US:LA|US:MS|US:AL|US:TN|US:KY|US:WV|US:VA|US:NC|US:SC|US:GA|US:FL) LOCATION_REGION=na-us-southeast ;;
+        US:PA|US:NY|US:VT|US:NH|US:ME|US:MA|US:RI|US:CT|US:NJ|US:DE|US:MD) LOCATION_REGION=na-us-northeast ;;
+        CA:BC) LOCATION_REGION=na-ca-west ;;
+        CA:QC|CA:ON) LOCATION_REGION=na-ca-central ;;
+        CA:AB|CA:SK|CA:MB) LOCATION_REGION=na-ca-prairie ;;
+        CA:NL|CA:PE|CA:NS|CA:NB) LOCATION_REGION=na-ca-atlantic ;;
+        CA:NU|CA:NT|CA:YT) LOCATION_REGION=na-ca-north ;;
+        *) return 1 ;;
+    esac
+    LOCATION_COUNTRY=$country
+}
+
+normalize_latin_city_name() {
+    printf '%s' "$1" | sed \
+        -e 's/[ÀÁÂÃÄÅàáâãäå]/a/g' \
+        -e 's/[Çç]/c/g' \
+        -e 's/[ÈÉÊËèéêë]/e/g' \
+        -e 's/[ÌÍÎÏìíîï]/i/g' \
+        -e 's/[Ññ]/n/g' \
+        -e 's/[ÒÓÔÕÖØòóôõöø]/o/g' \
+        -e 's/[ÙÚÛÜùúûü]/u/g' \
+        -e 's/[ÝŸýÿ]/y/g' \
+        -e 's/[Šš]/s/g' \
+        -e 's/[Žž]/z/g' \
+        -e 's/[Łł]/l/g' \
+        -e 's/[ŹŻźż]/z/g' \
+        -e 's/ß/ss/g'
+}
+
+city_code_from_name() {
+    local city compact
+    city=$(normalize_latin_city_name "$1")
+    city=${city,,}
+    case "$city" in
+        chicago) printf 'CHI' ;;
+        'new york'|'new york city') printf 'NYC' ;;
+        'los angeles') printf 'LAX' ;;
+        'san francisco') printf 'SFO' ;;
+        london) printf 'LON' ;;
+        singapore) printf 'SIN' ;;
+        frankfurt|'frankfurt am main') printf 'FRA' ;;
+        zurich) printf 'ZRH' ;;
+        'sao paulo') printf 'SAO' ;;
+        *)
+            compact=$(printf '%s' "$city" | LC_ALL=C tr -cd 'A-Za-z')
+            ((${#compact} >= 3)) || return 1
+            compact=${compact:0:3}
+            [[ $compact =~ ^[A-Za-z]{3}$ ]] || return 1
+            printf '%s' "$compact" | tr '[:lower:]' '[:upper:]'
+            ;;
+    esac
+}
+
+timezone_from_utc_offset() {
+    local offset=$1 sign hours minutes rounded
+    [[ $offset =~ ^([+-])([0-9]{2})([0-9]{2})$ ]] || return 1
+    sign=${BASH_REMATCH[1]}
+    hours=$((10#${BASH_REMATCH[2]}))
+    minutes=$((10#${BASH_REMATCH[3]}))
+    rounded=$hours
+    ((minutes >= 30)) && rounded=$((rounded + 1))
+    ((rounded <= 14)) || return 1
+    if [[ $sign == - && $rounded -ne 0 ]]; then
+        printf 'utc-%s' "$rounded"
+    else
+        printf 'utc+%s' "$rounded"
+    fi
+}
+
+append_location_detection_error() {
+    local message=$1
+    if [[ -n ${LOCATION_DETECTION_ERROR:-} ]]; then
+        LOCATION_DETECTION_ERROR+="; $message"
+    else
+        LOCATION_DETECTION_ERROR=$message
+    fi
+}
+
+fetch_location_fields() {
+    local provider=$1 url filter json reason
+    case "$provider" in
+        ipwho)
+            url=https://ipwho.is/
+            filter='select(.success == true and (.country_code | type) == "string" and (.city | type) == "string" and (.timezone.utc | type) == "string") | [.country_code, .region_code, .city, (.timezone.utc | gsub(":"; "")), .continent_code] | @tsv'
+            ;;
+        ipapi)
+            url=https://ipapi.co/json/
+            filter='select((.error // false) == false and (.country_code | type) == "string" and (.city | type) == "string" and (.utc_offset | type) == "string") | [.country_code, .region_code, .city, .utc_offset, .continent_code] | @tsv'
+            ;;
+        *) return 1 ;;
+    esac
+
+    if ! json=$(ssh_to_node 0 \
+        "if command -v curl >/dev/null 2>&1; then curl --silent --show-error --max-time 8 $url; elif command -v wget >/dev/null 2>&1; then wget -qO- -T 8 $url; else exit 1; fi" \
+        2>/dev/null); then
+        append_location_detection_error "$provider request failed"
+        return 1
+    fi
+    if LOCATION_FIELDS=$(jq -er "$filter" <<<"$json" 2>/dev/null); then
+        return
+    fi
+    reason=$(jq -r '.reason // .message // .error // empty | tostring' <<<"$json" 2>/dev/null || true)
+    append_location_detection_error "$provider: ${reason:-invalid response}"
+    return 1
+}
+
+resolve_country_input() {
+    local input=$1 country_file=/usr/share/zoneinfo/iso3166.tab code
+    if [[ $input =~ ^[A-Za-z]{2}$ ]]; then
+        printf '%s' "${input^^}"
+        return
+    fi
+    [[ -r $country_file ]] || return 1
+    code=$(awk -F '\t' -v requested="${input,,}" \
+        'tolower($2) == requested { print $1; exit }' "$country_file")
+    [[ $code =~ ^[A-Z]{2}$ ]] || return 1
+    printf '%s' "$code"
+}
+
+detect_provider_location() {
+    local fields country subdivision city offset continent area
+    LOCATION_DETECTION_ERROR=
+    if ! command -v jq >/dev/null 2>&1; then
+        LOCATION_DETECTION_ERROR='jq is unavailable on the installer host'
+        return 1
+    fi
+    if fetch_location_fields ipwho || fetch_location_fields ipapi; then
+        fields=$LOCATION_FIELDS
+    else
+        return 1
+    fi
+    IFS=$'\t' read -r country subdivision city offset continent <<<"$fields"
+    if [[ ! $country =~ ^[A-Z]{2}$ || -z $city ]]; then
+        append_location_detection_error 'geolocation response did not include a country and city'
+        return 1
+    fi
+
+    if [[ $country == US || $country == CA ]]; then
+        if ! map_north_america_subdivision "$country" "$subdivision"; then
+            append_location_detection_error "subdivision $country-$subdivision is not mapped"
+            return 1
+        fi
+    else
+        case "$continent" in
+            NA) area=central ;;
+            SA) area=south-america ;;
+            EU) area=europe ;;
+            AF) area=africa ;;
+            AS) area=asia ;;
+            OC) area=oceania ;;
+            *) return 1 ;;
+        esac
+        if ! map_location_country "$area" "$country"; then
+            append_location_detection_error "country $country is not mapped to the Akash region schema"
+            return 1
+        fi
+    fi
+    if ! CITY=$(city_code_from_name "$city"); then
+        append_location_detection_error "could not derive a city code from $city"
+        return 1
+    fi
+    GEO_CITY_NAME=$city
+    if [[ ${offset: -2} == 00 ]]; then
+        GEO_TIMEZONE_APPROXIMATE=false
+    else
+        GEO_TIMEZONE_APPROXIMATE=true
+    fi
+    if ! TIMEZONE=$(timezone_from_utc_offset "$offset"); then
+        append_location_detection_error "UTC offset $offset is not supported by the Akash schema"
+        return 1
+    fi
+}
+
+collect_manual_city_timezone() {
+    local city_name
+    while true; do
+        city_name=$(ask "Provider city")
+        if CITY=$(city_code_from_name "$city_name"); then
+            break
+        fi
+        warn "Enter a city name containing at least three letters."
+    done
+    GEO_CITY_NAME=$city_name
+    while true; do
+        TIMEZONE=$(ask "UTC offset (utc-12 through utc+14)")
+        [[ $TIMEZONE =~ ^utc([-+])([0-9]|1[0-4])$ ]] && break
+        warn "Enter an accepted whole-hour offset such as utc-6 or utc+1."
+    done
+}
+
+collect_manual_location_region() {
+    local selected_country=${1:-} region country
+    while true; do
+        region=$(ask "Accepted location-region code")
+        if is_valid_location_region "$region"; then
+            LOCATION_REGION=$region
+            break
+        fi
+        warn "That value is not present in the current Akash provider schema."
+    done
+    country=$selected_country
+    if [[ ! $country =~ ^[A-Z]{2}$ ]]; then
+        while true; do
+            country=$(ask "ISO country code")
+            country=${country^^}
+            [[ $country =~ ^[A-Z]{2}$ ]] && break
+            warn "Enter a two-letter ISO country code."
+        done
+    fi
+    LOCATION_COUNTRY=$country
+    collect_manual_city_timezone
+}
+
+collect_north_america_location() {
+    local country_choice region_choice
+    ui_screen "LOCATION" "Choose the North American country" \
+        "The Akash schema divides the United States and Canada into provider regions."
+    ui_option "1" "United States" "Choose one of five provider regions"
+    ui_option "2" "Canada" "Choose one of five provider regions"
+    while true; do
+        country_choice=$(ask "Country" "1")
+        [[ $country_choice == 1 || $country_choice == 2 ]] && break
+        warn "Choose 1 or 2."
+    done
+
+    if [[ $country_choice == 1 ]]; then
+        LOCATION_COUNTRY=US
+        ui_screen "LOCATION" "Choose the United States region" \
+            "State groupings match the accepted Akash provider schema."
+        ui_option "1" "West" "CA, OR, WA, ID, MT, WY, UT, CO, NV, AK, HI"
+        ui_option "2" "Southwest" "AZ, NM, TX, OK"
+        ui_option "3" "Midwest" "ND through OH"
+        ui_option "4" "Southeast" "AR through FL"
+        ui_option "5" "Northeast" "PA through MD"
+        while true; do
+            region_choice=$(ask "United States region" "1")
+            case "$region_choice" in
+                1) LOCATION_REGION=na-us-west; break ;;
+                2) LOCATION_REGION=na-us-southwest; break ;;
+                3) LOCATION_REGION=na-us-midwest; break ;;
+                4) LOCATION_REGION=na-us-southeast; break ;;
+                5) LOCATION_REGION=na-us-northeast; break ;;
+                *) warn "Choose a region from 1 to 5." ;;
+            esac
+        done
+    else
+        LOCATION_COUNTRY=CA
+        ui_screen "LOCATION" "Choose the Canadian region" \
+            "Province groupings match the accepted Akash provider schema."
+        ui_option "1" "West coast" "British Columbia"
+        ui_option "2" "Central" "Quebec and Ontario"
+        ui_option "3" "Prairie" "Alberta, Saskatchewan, Manitoba"
+        ui_option "4" "Atlantic" "NL, PE, NS, NB"
+        ui_option "5" "North" "NU, NT, YT"
+        while true; do
+            region_choice=$(ask "Canadian region" "2")
+            case "$region_choice" in
+                1) LOCATION_REGION=na-ca-west; break ;;
+                2) LOCATION_REGION=na-ca-central; break ;;
+                3) LOCATION_REGION=na-ca-prairie; break ;;
+                4) LOCATION_REGION=na-ca-atlantic; break ;;
+                5) LOCATION_REGION=na-ca-north; break ;;
+                *) warn "Choose a region from 1 to 5." ;;
+            esac
+        done
+    fi
+}
+
+collect_location_region() {
+    local area_choice area area_name country
+    if detect_provider_location; then
+        ui_screen "LOCATION" "Provider location detected" \
+            "The lookup ran from node1, so it reflects the provider's public IP."
+        ui_key_value "City" "$GEO_CITY_NAME ($CITY)"
+        ui_key_value "Country" "$LOCATION_COUNTRY"
+        ui_key_value "Provider region" "$LOCATION_REGION"
+        ui_key_value "Timezone" "$TIMEZONE"
+        if $GEO_TIMEZONE_APPROXIMATE; then
+            ui_note "The Akash schema accepts whole-hour UTC offsets; this offset was rounded."
+        fi
+        printf '\n'
+        if confirm "Use this detected location?" y; then
+            return
+        fi
+        LOCATION_DETECTION_ERROR='the detected location was declined'
+    fi
+
+    ui_screen "LOCATION" "Locate the provider" \
+        "Automatic lookup was unavailable or declined. The wizard will build valid attributes."
+    ui_note "Automatic lookup: ${LOCATION_DETECTION_ERROR:-unknown failure}."
+    ui_option "1" "North America" "United States or Canada"
+    ui_option "2" "Central / Caribbean" "Central America and Caribbean nations"
+    ui_option "3" "South America" "North, west, south, or Brazil"
+    ui_option "4" "Europe" "UN geoscheme-derived European regions"
+    ui_option "5" "Africa" "East, middle, north, south, or west"
+    ui_option "6" "Asia" "Central, east, southeast, south, or west"
+    ui_option "7" "Oceania" "Australia, New Zealand, Melanesia, Micronesia, Polynesia"
+    ui_option "8" "Advanced" "Enter an accepted region code manually"
+    while true; do
+        area_choice=$(ask "Geographic area" "1")
+        case "$area_choice" in
+            1) collect_north_america_location; collect_manual_city_timezone; return ;;
+            2) area=central; area_name='Central America or Caribbean'; break ;;
+            3) area=south-america; area_name='South America'; break ;;
+            4) area=europe; area_name='Europe'; break ;;
+            5) area=africa; area_name='Africa'; break ;;
+            6) area=asia; area_name='Asia'; break ;;
+            7) area=oceania; area_name='Oceania'; break ;;
+            8) collect_manual_location_region; return ;;
+            *) warn "Choose an area from 1 to 8." ;;
+        esac
+    done
+
+    ui_screen "LOCATION" "Choose the country" \
+        "The ISO country code is mapped to an accepted $area_name provider region."
+    while true; do
+        country=$(ask "Country name or two-letter ISO code")
+        if ! country=$(resolve_country_input "$country"); then
+            warn "Enter a recognized country name or its two-letter ISO code."
+            continue
+        fi
+        if map_location_country "$area" "$country"; then
+            collect_manual_city_timezone
+            return
+        fi
+        warn "$country is not mapped to $area_name in the current Akash schema."
+        if confirm "Enter an accepted location-region manually?" n; then
+            collect_manual_location_region "$country"
+            return
+        fi
+    done
+}
+
+detect_provider_hardware() {
+    local cpu_info vendor architecture dmi memory_generation
+    cpu_info=$(ssh_to_node 0 "LC_ALL=C lscpu" 2>/dev/null) || return 1
+    vendor=$(awk -F: '/^Vendor ID:/{gsub(/^[[:space:]]+/, "", $2); print $2; exit}' <<<"$cpu_info")
+    architecture=$(awk -F: '/^Architecture:/{gsub(/^[[:space:]]+/, "", $2); print $2; exit}' <<<"$cpu_info")
+    case "$vendor" in
+        GenuineIntel|*Intel*) CPU_VENDOR=intel ;;
+        AuthenticAMD|*AMD*) CPU_VENDOR=amd ;;
+        *) return 1 ;;
+    esac
+    case "$architecture" in
+        x86_64) CPU_ARCH=x86-64 ;;
+        *) return 1 ;;
+    esac
+
+    MEMORY_TYPE=
+    if dmi=$(ssh_to_node 0 "sudo -n dmidecode --type memory" 2>/dev/null); then
+        memory_generation=$(awk -F: '/^[[:space:]]*Type: DDR[345]/{gsub(/[[:space:]]/, "", $2); print tolower($2); exit}' <<<"$dmi")
+        if [[ $memory_generation =~ ^ddr[345]$ ]]; then
+            MEMORY_TYPE=$memory_generation
+            if grep -Eiq 'Error Correction Type:.*(ECC|Single-bit|Multi-bit)' <<<"$dmi"; then
+                MEMORY_TYPE+=ecc
+            fi
+        fi
+    fi
+}
+
+collect_hardware_profile() {
+    local detected=false
+    detect_provider_hardware && detected=true
+    if $detected; then
+        ui_screen "HARDWARE" "Provider hardware detected" \
+            "CPU details and available memory metadata were read from node1."
+        ui_key_value "CPU vendor" "$CPU_VENDOR"
+        ui_key_value "CPU architecture" "$CPU_ARCH"
+        ui_key_value "Memory type" "${MEMORY_TYPE:-Not exposed by system firmware}"
+        printf '\n'
+        if confirm "Use this detected hardware profile?" y; then
+            if [[ -z $MEMORY_TYPE ]]; then
+                MEMORY_TYPE=$(ask_validated \
+                    "Memory type (ddr2/ddr3/ddr3ecc/ddr4/ddr4ecc/ddr5/ddr5ecc)" "ddr4ecc" \
+                    '^(ddr2|ddr3|ddr3ecc|ddr4|ddr4ecc|ddr5|ddr5ecc)$' \
+                    "Choose a memory type accepted by the provider schema.")
+            fi
+            return
+        fi
+    fi
+    CPU_VENDOR=$(ask_validated "CPU vendor (intel/amd)" "amd" '^(intel|amd)$' \
+        "CPU vendor must be intel or amd.")
+    CPU_ARCH=$(ask_validated "CPU architecture" "x86-64" '^x86-64$' \
+        "Only x86-64 is currently supported.")
+    MEMORY_TYPE=$(ask_validated \
+        "Memory type (ddr2/ddr3/ddr3ecc/ddr4/ddr4ecc/ddr5/ddr5ecc)" "ddr4ecc" \
+        '^(ddr2|ddr3|ddr3ecc|ddr4|ddr4ecc|ddr5|ddr5ecc)$' \
+        "Choose a memory type accepted by the provider schema.")
+}
+
+collect_provider_config() {
+    $INSTALL_PROVIDER || return 0
+    ui_screen "6 / 8" "Define the provider identity" \
+        "These values become public provider attributes on the Akash network."
+    DOMAIN=$(ask_validated "Provider domain (without provider. prefix)" '' \
+        '^[A-Za-z0-9.-]+\.[A-Za-z]{2,}$' "Enter a valid provider domain such as example.com.")
+    collect_location_region
+    ui_screen "6 / 8" "Complete the provider identity" \
+        "The location helper selected a schema-compatible provider region."
+    ui_key_value "Domain" "$DOMAIN"
+    ui_key_value "Country" "$LOCATION_COUNTRY"
+    ui_key_value "Location region" "$LOCATION_REGION"
+    printf '\n'
+    ORGANIZATION=$(ask_required "Organization")
+    EMAIL=$(ask_validated "Contact email" '' \
+        '^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$' "Enter a valid contact email address.")
+    WEBSITE=$(ask_required "Website URL" "https://$DOMAIN")
+    DISCORD_USERNAME=$(ask_required "Discord username")
+    STATUS_PAGE=$(ask_required "Status page URL" "$WEBSITE")
+    COUNTRY=$LOCATION_COUNTRY
+    LOCATION_TYPE=$(ask_validated "Location type (datacenter/colo/home/office/mix)" "datacenter" \
+        '^(datacenter|colo|home|office|mix)$' "Choose datacenter, colo, home, office, or mix.")
+    HOSTING_PROVIDER=$(ask_required "Hosting provider or facility")
+    collect_hardware_profile
+    NETWORK_PROVIDER=$(ask_required "Network provider")
+    NETWORK_SPEED_UP=$(ask_validated "Upload speed Mbps" "1000" '^[0-9]+$' \
+        "Upload speed must be an integer in Mbps.")
+    NETWORK_SPEED_DOWN=$(ask_validated "Download speed Mbps" "1000" '^[0-9]+$' \
+        "Download speed must be an integer in Mbps.")
+
+    require_nonempty "Domain" "$DOMAIN"
+    require_nonempty "Organization" "$ORGANIZATION"
+    require_nonempty "Email" "$EMAIL"
+    require_nonempty "Website" "$WEBSITE"
+    require_nonempty "Discord username" "$DISCORD_USERNAME"
+    require_nonempty "Status page" "$STATUS_PAGE"
+    require_nonempty "Hosting provider" "$HOSTING_PROVIDER"
+    require_nonempty "Network provider" "$NETWORK_PROVIDER"
+    [[ $EMAIL =~ ^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$ ]] || die "Invalid email address."
+    [[ $DOMAIN =~ ^[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]] || die "Invalid provider domain."
+    [[ $COUNTRY =~ ^[A-Za-z]{2}$ ]] || die "Country must be an ISO alpha-2 code."
+    [[ $CITY =~ ^[A-Za-z]{3}$ ]] || die "City must be a three-letter code."
+    [[ $LOCATION_TYPE =~ ^(datacenter|colo|home|office|mix)$ ]] || die "Invalid location type."
+    [[ $CPU_VENDOR =~ ^(intel|amd)$ ]] || die "CPU vendor must be intel or amd."
+    [[ $CPU_ARCH == x86-64 ]] || die "Only x86-64 is currently supported."
+    [[ $MEMORY_TYPE =~ ^(ddr2|ddr3|ddr3ecc|ddr4|ddr4ecc|ddr5|ddr5ecc)$ ]] || die "Memory type is not accepted by the provider schema."
+    [[ $NETWORK_SPEED_UP =~ ^[0-9]+$ && $NETWORK_SPEED_DOWN =~ ^[0-9]+$ ]] || die "Network speeds must be integers."
+
+    collect_wallet_config
+    collect_acme_config
+}
+
+collect_gpu_config() {
+    $INSTALL_GPU || return 0
+    detect_nvidia_gpu_profiles || die "${GPU_DETECTION_ERROR:-Unable to detect supported NVIDIA GPU hardware.}"
+    ui_screen "4 / 8" "NVIDIA GPU hardware detected" \
+        "PCI IDs were matched against the pinned Akash provider-configs database."
+    local summary
+    for summary in "${GPU_NODE_SUMMARIES[@]}"; do
+        ui_key_value "${summary%%|*}" "${summary#*|}"
+    done
+    ui_key_value "CUDA attribute" "$CUDA_VERSION"
+    ui_key_value "Fabric Manager" "$([[ $GPU_FABRIC_MANAGER == true ]] && printf Enabled || printf Disabled)"
+    ui_note "GPU Operator and provider attributes will use this detected profile."
+}
+
+load_gpu_database() {
+    if [[ -n ${PROVIDER_GPU_DATABASE_FILE:-} ]]; then
+        GPU_DATABASE_FILE=$PROVIDER_GPU_DATABASE_FILE
+    else
+        GPU_DATABASE_FILE=$(mktemp)
+        TEMP_PATHS+=("$GPU_DATABASE_FILE")
+        local commit
+        commit=$(version_value gpu_database_commit)
+        curl --fail --silent --show-error --location \
+            "https://raw.githubusercontent.com/akash-network/provider-configs/${commit}/devices/pcie/gpus.json" \
+            --output "$GPU_DATABASE_FILE" || return 1
+        local actual_sha256 expected_sha256
+        actual_sha256=$(sha256sum "$GPU_DATABASE_FILE" | awk '{print $1}')
+        expected_sha256=$(version_value gpu_database_sha256)
+        [[ $actual_sha256 == "$expected_sha256" ]] || return 1
+    fi
+    jq -e 'type == "object"' "$GPU_DATABASE_FILE" >/dev/null
+}
+
+append_gpu_profile() {
+    local candidate=$1 existing
+    for existing in "${GPU_PROFILES[@]}"; do
+        [[ $existing == "$candidate" ]] && return
+    done
+    GPU_PROFILES+=("$candidate")
+}
+
+detect_nvidia_gpu_profiles() {
+    local i pci_devices vendor_id device_id record model memory interface profile
+    GPU_PROFILES=()
+    GPU_NODE_SUMMARIES=()
+    GPU_DETECTION_ERROR=
+    GPU_FABRIC_MANAGER=false
+    load_gpu_database || {
+        GPU_DETECTION_ERROR="Unable to load or verify the pinned Akash GPU device database."
+        return 1
+    }
+
+    for i in "${!NODE_IPS[@]}"; do
+        # shellcheck disable=SC2016 # Variables expand on the remote node.
+        pci_devices=$(ssh_to_node "$i" '
+            for path in /sys/bus/pci/devices/*; do
+                vendor=$(cat "$path/vendor" 2>/dev/null) || continue
+                class=$(cat "$path/class" 2>/dev/null) || continue
+                case "$class" in 0x0300*|0x0302*) ;; *) continue ;; esac
+                device=$(cat "$path/device" 2>/dev/null) || continue
+                printf "%s %s\n" "${vendor#0x}" "${device#0x}"
+            done
+        ' 2>/dev/null) || {
+            GPU_DETECTION_ERROR="Unable to inspect PCI hardware on node$((i + 1))."
+            return 1
+        }
+        while read -r vendor_id device_id; do
+            [[ -n $vendor_id && ${vendor_id,,} == 10de ]] || continue
+            record=$(jq -r --arg vendor "${vendor_id,,}" --arg device "${device_id,,}" \
+                '.[$vendor].devices[$device] // empty | [.name, .memory_size, .interface] | @tsv' \
+                "$GPU_DATABASE_FILE")
+            if [[ -z $record ]]; then
+                GPU_DETECTION_ERROR="NVIDIA PCI device ${vendor_id,,}:${device_id,,} on node$((i + 1)) is not in the pinned Akash GPU database."
+                return 1
+            fi
+            IFS=$'\t' read -r model memory interface <<<"$record"
+            case "${interface,,}" in
+                sxm*) interface=sxm; GPU_FABRIC_MANAGER=true ;;
+                pcie*) interface=pcie ;;
+                *)
+                    GPU_DETECTION_ERROR="Unsupported GPU interface '$interface' for ${model} on node$((i + 1))."
+                    return 1
+                    ;;
+            esac
+            profile="$model|$memory|$interface"
+            append_gpu_profile "$profile"
+            GPU_NODE_SUMMARIES+=("node$((i + 1))|${model} · ${memory} · ${interface} (${vendor_id,,}:${device_id,,})")
+        done <<<"$pci_devices"
+    done
+
+    ((${#GPU_PROFILES[@]} > 0)) || {
+        GPU_DETECTION_ERROR="GPU installation was selected, but no NVIDIA display controller was found on the configured nodes."
+        return 1
+    }
+    CUDA_VERSION=$(version_value gpu_cuda_version)
+}
+
+collect_wallet_config() {
+    if ! $CONFIG_ONLY; then
+        install_akt
+        ensure_akt_context
+    fi
+    ui_screen "7 / 8" "Connect the provider wallet" \
+        "Private key material is encoded into the protected generated inventory."
+    if $CONFIG_ONLY; then
+        ui_note "Configuration-only mode requires pre-encoded key material."
+        local choice=4
+    else
+        ui_option "1" "Use existing key" "Export a key already available to akt"
+        ui_option "2" "Create new key" "Generate and export a new provider wallet"
+        ui_option "3" "Recover key" "Recover from a mnemonic, then export"
+        ui_option "4" "Encoded material" "Enter an address and pre-encoded secrets"
+        local choice
+        choice=$(ask "Select wallet method" "1")
+    fi
+    local key_name temp_key keyring_password export_password result_file wallet_error_file mnemonic_file mnemonic
+    if [[ $choice == 4 ]]; then
+        AKASH_ADDRESS=$(ask_validated "Akash wallet address" "" \
+            '^akash1[02-9ac-hj-np-z]{38}$' \
+            "Enter a valid lowercase Akash account address beginning with akash1.")
+        PROVIDER_B64_KEY=$(ask_secret_base64 "Base64 provider key")
+        PROVIDER_B64_KEYSECRET=$(ask_secret_base64 "Base64 key password")
+        return
+    fi
+
+    key_name=$(ask "Key name" "provider")
+    keyring_password=$(ask_secret_confirmed "AKT keyring password")
+    export_password=$(openssl rand -hex 32)
+    ui_note "The provider export password is generated automatically and stored only in the protected inventory."
+    result_file=$(mktemp)
+    TEMP_PATHS+=("$result_file")
+    chmod 0600 "$result_file"
+    wallet_error_file=$(mktemp)
+    TEMP_PATHS+=("$wallet_error_file")
+    chmod 0600 "$wallet_error_file"
+    case "$choice" in
+        1)
+            if ! run_akt_with_passwords "$keyring_password" "$export_password" \
+                "$AKT_BIN" --context "$AKT_CONTEXT" context keys show "$key_name" --address >"$result_file"; then
+                die "Unable to unlock or find AKT key '$key_name'."
+            fi
+            AKASH_ADDRESS=$(tr -d '[:space:]' <"$result_file")
+            ;;
+        2)
+            while true; do
+                : >"$result_file"
+                : >"$wallet_error_file"
+                if run_akt_with_passwords "$keyring_password" "$export_password" \
+                    "$AKT_BIN" --context "$AKT_CONTEXT" --output json context keys add "$key_name" \
+                    >"$result_file" 2>"$wallet_error_file"; then
+                    AKASH_ADDRESS=$(jq -er '.address' "$result_file")
+                    mnemonic=$(jq -er '.mnemonic' "$result_file")
+                    printf '\n%b      SAVE THIS RECOVERY MNEMONIC%b\n\n      %s\n' "$YELLOW$BOLD" "$NC" "$mnemonic"
+                    break
+                fi
+
+                if grep -q 'already exists' "$wallet_error_file"; then
+                    warn "AKT key '$key_name' already exists."
+                    if confirm "Use existing key '$key_name' instead?" y; then
+                        : >"$result_file"
+                        : >"$wallet_error_file"
+                        if run_akt_with_passwords "$keyring_password" "$export_password" \
+                            "$AKT_BIN" --context "$AKT_CONTEXT" context keys show "$key_name" --address \
+                            >"$result_file" 2>"$wallet_error_file"; then
+                            AKASH_ADDRESS=$(tr -d '[:space:]' <"$result_file")
+                            break
+                        fi
+                        cat "$wallet_error_file" >&2
+                        warn "Unable to unlock AKT key '$key_name'. Re-enter the keyring password."
+                        keyring_password=$(ask_secret_confirmed "AKT keyring password")
+                        continue
+                    fi
+                    key_name=$(ask_required "New key name")
+                    continue
+                fi
+
+                cat "$wallet_error_file" >&2
+                warn "Unable to create AKT key '$key_name'. Correct the key name or password and retry."
+                key_name=$(ask_required "Key name" "$key_name")
+                keyring_password=$(ask_secret_confirmed "AKT keyring password")
+            done
+            ;;
+        3)
+            mnemonic=$(ask_secret "Recovery mnemonic")
+            [[ $mnemonic =~ [^[:space:]] ]] || die "Recovery mnemonic cannot be empty."
+            mnemonic_file=$(mktemp)
+            TEMP_PATHS+=("$mnemonic_file")
+            chmod 0600 "$mnemonic_file"
+            printf '%s\n' "$mnemonic" >"$mnemonic_file"
+            if ! run_akt_with_passwords "$keyring_password" "$export_password" \
+                "$AKT_BIN" --context "$AKT_CONTEXT" --output json context keys add "$key_name" \
+                --source "$mnemonic_file" >"$result_file"; then
+                die "Unable to recover AKT key '$key_name'."
+            fi
+            AKASH_ADDRESS=$(jq -er '.address' "$result_file")
+            ;;
+        *) die "Invalid wallet method: $choice" ;;
+    esac
+    temp_key=$(mktemp)
+    TEMP_PATHS+=("$temp_key")
+    chmod 0600 "$temp_key"
+    if ! run_akt_with_passwords "$keyring_password" "$export_password" \
+        "$AKT_BIN" --context "$AKT_CONTEXT" context keys export "$key_name" >"$temp_key"; then
+        die "Unable to export AKT key '$key_name'."
+    fi
+    PROVIDER_B64_KEY=$(openssl base64 -A <"$temp_key")
+    rm -f "$temp_key"
+    PROVIDER_B64_KEYSECRET=$(printf '%s' "$export_password" | openssl base64 -A)
+    [[ $AKASH_ADDRESS =~ ^akash1[02-9ac-hj-np-z]{38}$ ]] || \
+        die "AKT returned an invalid Akash account address."
+    if ! is_valid_base64 "$PROVIDER_B64_KEY" || ! is_valid_base64 "$PROVIDER_B64_KEYSECRET"; then
+        die "AKT returned invalid encoded provider key material."
+    fi
+    keyring_password=
+    export_password=
+}
+
+validate_gcp_service_account() {
+    local key_path=$1
+    if command -v jq >/dev/null 2>&1; then
+        jq -e '
+            select(
+                .type == "service_account" and
+                (.project_id | type == "string" and length > 0) and
+                (.client_email | type == "string" and length > 0) and
+                (.private_key | type == "string" and length > 0)
+            )
+        ' "$key_path" >/dev/null 2>&1
+    elif command -v python3 >/dev/null 2>&1; then
+        python3 -c '
+import json, sys
+with open(sys.argv[1], encoding="utf-8") as stream:
+    value = json.load(stream)
+required = ("project_id", "client_email", "private_key")
+valid = isinstance(value, dict) and value.get("type") == "service_account"
+valid = valid and all(isinstance(value.get(key), str) and value[key] for key in required)
+raise SystemExit(0 if valid else 1)
+' "$key_path" >/dev/null 2>&1
+    else
+        return 1
+    fi
+}
+
+collect_acme_config() {
+    ui_screen "8 / 8" "Choose certificate automation" \
+        "DNS-01 is recommended for production wildcard certificates."
+    ui_option "1" "Cloudflare DNS-01" "API-token based certificate issuance"
+    ui_option "2" "Google Cloud DNS" "Service-account based certificate issuance"
+    ui_option "3" "Self-signed" "Placeholder certificate for initial testing"
+    local choice token key_path
+    choice=$(ask "Select TLS method" "3")
+    ACME_DNS_ZONE=$DOMAIN
+    case "$choice" in
+        1)
+            ACME_DNS_PROVIDER=cloudflare
+            ACME_DNS_ZONE=$(ask_validated "DNS zone" "$DOMAIN" \
+                '^[A-Za-z0-9.-]+\.[A-Za-z]{2,}$' "Enter a valid DNS zone such as example.com.")
+            token=$(ask_secret_required "Cloudflare API token")
+            ACME_CLOUDFLARE_TOKEN_B64=$(printf '%s' "$token" | openssl base64 -A)
+            ;;
+        2)
+            ACME_DNS_PROVIDER=gcp
+            ACME_DNS_ZONE=$(ask_validated "DNS zone" "$DOMAIN" \
+                '^[A-Za-z0-9.-]+\.[A-Za-z]{2,}$' "Enter a valid DNS zone such as example.com.")
+            ACME_GCP_PROJECT=$(ask_required "GCP project ID")
+            while true; do
+                key_path=$(ask_required "GCP service-account JSON path")
+                if [[ ! -r $key_path ]]; then
+                    warn "Cannot read $key_path."
+                elif ! validate_gcp_service_account "$key_path"; then
+                    warn "$key_path is not a Google service-account key."
+                else
+                    break
+                fi
+            done
+            ACME_GCP_JSON_B64=$(openssl base64 -A <"$key_path")
+            ;;
+        3) ACME_DNS_PROVIDER=none ;;
+        *) die "Invalid TLS method: $choice" ;;
+    esac
+}
+
+collect_tailscale_config() {
+    $INSTALL_TAILSCALE || return 0
+    ui_screen "5 / 8" "Connect the private management network" \
+        "The authentication key is stored only in the protected inventory."
+    TAILSCALE_AUTHKEY=$(ask_secret "Tailscale auth key")
+    require_nonempty "Tailscale auth key" "$TAILSCALE_AUTHKEY"
+}
+
+write_inventory() {
+    local i node_num remote_python_interpreter
+    remote_python_interpreter=$(version_value remote_python_interpreter)
+    rm -rf "$INVENTORY_DIR"
+    mkdir -p "$INVENTORY_DIR/host_vars" "$INVENTORY_DIR/group_vars"
+    chmod 0700 "$GENERATED_DIR" "$INVENTORY_DIR" "$INVENTORY_DIR/host_vars" "$INVENTORY_DIR/group_vars"
+
+    {
+        printf '[all]\n'
+        for i in "${!NODE_IPS[@]}"; do
+            node_num=$((i + 1))
+            printf 'node%s ansible_host=%s ip=%s access_ip=%s internal_ip=%s ansible_user=%s ansible_port=%s ansible_ssh_private_key_file=%s ansible_python_interpreter=%s\n' \
+                "$node_num" "${NODE_IPS[$i]}" "${NODE_INTERNAL_IPS[$i]}" "${NODE_INTERNAL_IPS[$i]}" \
+                "${NODE_INTERNAL_IPS[$i]}" "${NODE_USERS[$i]}" "${NODE_PORTS[$i]}" "$SSH_PRIVATE_KEY" \
+                "$remote_python_interpreter"
+        done
+        printf '\n[kube_control_plane]\n'
+        for ((i = 1; i <= CONTROL_PLANE_COUNT; i++)); do printf 'node%s etcd_member_name=etcd%s\n' "$i" "$i"; done
+        printf '\n[etcd:children]\nkube_control_plane\n\n[kube_node]\n'
+        for i in "${!NODE_IPS[@]}"; do printf 'node%s\n' "$((i + 1))"; done
+        printf '\n[k8s_cluster:children]\nkube_control_plane\nkube_node\n\n[calico_rr]\n'
+    } >"$INVENTORY_FILE"
+    chmod 0600 "$INVENTORY_FILE"
+
+    write_group_vars
+    write_host_vars
+    info "Generated inventory: $INVENTORY_FILE"
+}
+
+write_group_vars() {
+    local file="$INVENTORY_DIR/group_vars/all.yml"
+    {
+        printf '%s\n' '---'
+        printf 'provider_cluster_mode: %s\n' "$(yaml_quote "$CLUSTER_MODE")"
+        printf 'kubelet_root_dir: %s\n' "$(yaml_quote "${KUBELET_DIR:-/var/lib/kubelet}")"
+        printf 'k3s_data_dir: %s\n' "$(yaml_quote "${K3S_DATA_DIR:-/var/lib/rancher/k3s}")"
+        if $INSTALL_GPU; then
+            printf 'gpu_operator_fabric_manager_enabled: %s\n' "$GPU_FABRIC_MANAGER"
+        fi
+        if $INSTALL_TAILSCALE; then
+            printf 'tailscale_authkey: %s\n' "$(yaml_quote "$TAILSCALE_AUTHKEY")"
+        fi
+        if [[ -n ${TLS_SAN:-} ]]; then
+            printf 'tls_san: %s\n' "$(yaml_quote "$TLS_SAN")"
+        fi
+    } >"$file"
+    chmod 0600 "$file"
+}
+
+write_host_vars() {
+    local i node_num file
+    for i in "${!NODE_IPS[@]}"; do
+        node_num=$((i + 1))
+        file="$INVENTORY_DIR/host_vars/node${node_num}.yml"
+        {
+            printf '%s\n' '---'
+            printf 'internal_ip: %s\n' "$(yaml_quote "${NODE_INTERNAL_IPS[$i]}")"
+            printf 'kubernetes_node_name: %s\n' "$(yaml_quote "${KUBERNETES_NODE_NAMES[$i]:-node${node_num}}")"
+            printf 'kubernetes_storage_node_name: %s\n' \
+                "$(yaml_quote "${KUBERNETES_STORAGE_NODE_NAMES[$i]:-${KUBERNETES_NODE_NAMES[$i]:-node${node_num}}}")"
+            if [[ -n ${NODE_EXTERNAL_IPS[$i]:-} && ${NODE_EXTERNAL_IPS[$i]} != "${NODE_INTERNAL_IPS[$i]}" ]]; then
+                printf 'external_ip: %s\n' "$(yaml_quote "${NODE_EXTERNAL_IPS[$i]}")"
+            fi
+            printf 'tailscale_hostname: %s\n' "$(yaml_quote "node${node_num}-${DOMAIN:-akash-provider}")"
+            if [[ $node_num == 1 ]] && $INSTALL_PROVIDER; then
+                write_provider_vars
+            fi
+            if [[ $node_num == 1 ]] && $INSTALL_ROOK; then
+                write_storage_vars
+            fi
+        } >"$file"
+        chmod 0600 "$file"
+    done
+}
+
+write_provider_vars() {
+    printf 'akash1_address: %s\n' "$(yaml_quote "$AKASH_ADDRESS")"
+    printf 'provider_b64_key: %s\n' "$(yaml_quote "$PROVIDER_B64_KEY")"
+    printf 'provider_b64_keysecret: %s\n' "$(yaml_quote "$PROVIDER_B64_KEYSECRET")"
+    printf 'domain: %s\n' "$(yaml_quote "$DOMAIN")"
+    printf 'location_region: %s\n' "$(yaml_quote "$LOCATION_REGION")"
+    printf 'organization: %s\n' "$(yaml_quote "$ORGANIZATION")"
+    printf 'email: %s\n' "$(yaml_quote "$EMAIL")"
+    printf 'website: %s\n' "$(yaml_quote "$WEBSITE")"
+    printf 'discord_username: %s\n' "$(yaml_quote "$DISCORD_USERNAME")"
+    printf 'status_page: %s\n' "$(yaml_quote "$STATUS_PAGE")"
+    printf 'country: %s\n' "$(yaml_quote "${COUNTRY^^}")"
+    printf 'city: %s\n' "$(yaml_quote "${CITY^^}")"
+    printf 'timezone: %s\n' "$(yaml_quote "$TIMEZONE")"
+    printf 'location_type: %s\n' "$(yaml_quote "$LOCATION_TYPE")"
+    printf 'hosting_provider: %s\n' "$(yaml_quote "$HOSTING_PROVIDER")"
+    printf 'cpu_vendor: %s\n' "$(yaml_quote "$CPU_VENDOR")"
+    printf 'cpu_arch: %s\n' "$(yaml_quote "$CPU_ARCH")"
+    printf 'memory_type: %s\n' "$(yaml_quote "$MEMORY_TYPE")"
+    printf 'network_provider: %s\n' "$(yaml_quote "$NETWORK_PROVIDER")"
+    printf 'network_speed_up: %s\n' "$NETWORK_SPEED_UP"
+    printf 'network_speed_down: %s\n' "$NETWORK_SPEED_DOWN"
+    printf 'has_persistent_storage: %s\n' "$INSTALL_ROOK"
+    printf 'storage_class_name: %s\n' "$(yaml_quote "${STORAGE_CLASS:-beta3}")"
+    printf 'has_gpu: %s\n' "$INSTALL_GPU"
+    if $INSTALL_GPU; then
+        printf '%s\n' 'gpu_profiles:'
+        local gpu_profile gpu_model gpu_memory gpu_interface
+        for gpu_profile in "${GPU_PROFILES[@]}"; do
+            IFS='|' read -r gpu_model gpu_memory gpu_interface <<<"$gpu_profile"
+            printf '  - model: %s\n' "$(yaml_quote "$gpu_model")"
+            printf '    ram: %s\n' "$(yaml_quote "$gpu_memory")"
+            printf '    interface: %s\n' "$(yaml_quote "$gpu_interface")"
+        done
+        printf 'cuda_version: %s\n' "$(yaml_quote "$CUDA_VERSION")"
+    fi
+    printf 'acme_dns_provider: %s\n' "$(yaml_quote "$ACME_DNS_PROVIDER")"
+    printf 'acme_dns_zone: %s\n' "$(yaml_quote "$ACME_DNS_ZONE")"
+    if [[ -n ${ACME_CLOUDFLARE_TOKEN_B64:-} ]]; then
+        printf 'acme_cloudflare_api_token_b64: %s\n' "$(yaml_quote "$ACME_CLOUDFLARE_TOKEN_B64")"
+    fi
+    if [[ -n ${ACME_GCP_PROJECT:-} ]]; then
+        printf 'acme_gcp_project_id: %s\n' "$(yaml_quote "$ACME_GCP_PROJECT")"
+    fi
+    if [[ -n ${ACME_GCP_JSON_B64:-} ]]; then
+        printf 'acme_gcp_dns_sa_json_b64: %s\n' "$(yaml_quote "$ACME_GCP_JSON_B64")"
+    fi
+}
+
+write_storage_vars() {
+    local node candidate node_index candidate_node_name kubernetes_node_name expected_for_node
+    printf 'mon_count: %s\n' "$STORAGE_MON_COUNT"
+    printf 'mgr_count: %s\n' "$STORAGE_MGR_COUNT"
+    printf 'pool_size: %s\n' "$STORAGE_POOL_SIZE"
+    printf 'min_size: %s\n' "$STORAGE_MIN_SIZE"
+    printf 'failure_domain: %s\n' "$STORAGE_FAILURE_DOMAIN"
+    printf 'device_type: %s\n' "$(yaml_quote "$STORAGE_DEVICE_TYPE")"
+    printf 'osds_per_device: %s\n' "$STORAGE_OSDS_PER_DEVICE"
+    printf 'expected_osd_count: %s\n' "$STORAGE_EXPECTED_OSD_COUNT"
+    printf 'storage_class: %s\n' "$(yaml_quote "$STORAGE_CLASS")"
+    printf '%s\n' 'storage_nodes:'
+    for node in "${STORAGE_NODES[@]}"; do
+        expected_for_node=0
+        kubernetes_node_name=
+        for candidate in "${STORAGE_SELECTED_CANDIDATES[@]}"; do
+            node_index=${STORAGE_CANDIDATE_NODE_INDEXES[$candidate]}
+            candidate_node_name=$(storage_node_name_for_index "$node_index")
+            if [[ $candidate_node_name == "$node" ]]; then
+                expected_for_node=$((expected_for_node + 1))
+                kubernetes_node_name=${KUBERNETES_NODE_NAMES[$node_index]:-node$((node_index + 1))}
+            fi
+        done
+        printf '  - name: %s\n' "$(yaml_quote "$node")"
+        printf '    kubernetes_node_name: %s\n' "$(yaml_quote "$kubernetes_node_name")"
+        printf '    expected_osds: %s\n' "$expected_for_node"
+        printf '%s\n' '    devices:'
+        for candidate in "${STORAGE_SELECTED_CANDIDATES[@]}"; do
+            node_index=${STORAGE_CANDIDATE_NODE_INDEXES[$candidate]}
+            candidate_node_name=$(storage_node_name_for_index "$node_index")
+            [[ $candidate_node_name == "$node" ]] || continue
+            printf '      - name: %s\n' "$(yaml_quote "${STORAGE_CANDIDATE_IDS[$candidate]}")"
+        done
+    done
+}
+
+review_configuration() {
+    local i mode_label
+    case "$CLUSTER_MODE" in
+        kubespray) mode_label='Kubernetes via Kubespray' ;;
+        k3s) mode_label='K3s' ;;
+        existing) mode_label='Existing Kubernetes' ;;
+    esac
+
+    ui_screen "REVIEW" "Ready to generate the installation" \
+        "Secrets are redacted. Review the plan before cluster deployment begins."
+    ui_key_value "Cluster foundation" "$mode_label"
+    ui_key_value "Control planes" "$CONTROL_PLANE_COUNT"
+    if [[ $CLUSTER_MODE == k3s ]]; then
+        ui_key_value "Kubelet data" "${KUBELET_DIR:-/var/lib/kubelet} (automatic)"
+    else
+        ui_key_value "Kubelet data" "${KUBELET_DIR:-/var/lib/kubelet}"
+    fi
+    if [[ $CLUSTER_MODE == kubespray ]]; then
+        ui_key_value "Containerd data" "${CONTAINERD_DIR:-/var/lib/containerd}"
+    elif [[ $CLUSTER_MODE == k3s ]]; then
+        ui_key_value "K3s data" "${K3S_DATA_DIR:-/var/lib/rancher/k3s}"
+    fi
+    printf '\n%b      HOSTS%b\n' "$BOLD" "$NC"
+    for i in "${!NODE_IPS[@]}"; do
+        ui_key_value "node$((i + 1))" "${NODE_USERS[$i]}@${NODE_IPS[$i]}:${NODE_PORTS[$i]}"
+    done
+    printf '\n%b      COMPONENTS%b\n' "$BOLD" "$NC"
+    ui_selected "$INSTALL_OS" "OS" "Tuning and maintenance"
+    ui_selected "$INSTALL_GPU" "GPU" "NVIDIA GPU Operator"
+    ui_selected "$INSTALL_ROOK" "Storage" "Rook-Ceph ${STORAGE_CLASS:-}"
+    ui_selected "$INSTALL_PROVIDER" "Provider" "${DOMAIN:-Akash provider stack}"
+    ui_selected "$INSTALL_TAILSCALE" "Tailscale" "Private management network"
+    if $INSTALL_ROOK; then
+        printf '\n%b      STORAGE%b\n' "$BOLD" "$NC"
+        ui_key_value "Physical disks / OSDs" "$STORAGE_EXPECTED_OSD_COUNT / $STORAGE_EXPECTED_OSD_COUNT"
+        ui_key_value "Storage hosts" "${#STORAGE_NODES[@]}"
+        ui_key_value "Replication" "$STORAGE_POOL_SIZE copies across $STORAGE_FAILURE_DOMAIN"
+        ui_key_value "Akash class" "$STORAGE_CLASS ($STORAGE_DEVICE_TYPE)"
+    fi
+    if $INSTALL_PROVIDER; then
+        printf '\n%b      PROVIDER%b\n' "$BOLD" "$NC"
+        ui_key_value "Wallet" "${AKASH_ADDRESS:0:12}…${AKASH_ADDRESS: -6}"
+        ui_key_value "Region" "$LOCATION_REGION"
+        ui_key_value "TLS" "$ACME_DNS_PROVIDER"
+    fi
+    printf '\n'
+    confirm "Generate this configuration and continue?" y || die "Installation cancelled during review."
+}
+
+configure_kubespray_inventory() {
+    local target="$KUBESPRAY_DIR/inventory/akash"
+    rm -rf "$target"
+    cp -a "$KUBESPRAY_DIR/inventory/sample" "$target"
+    cp "$INVENTORY_FILE" "$target/inventory.ini"
+    cat >"$target/group_vars/all/akash.yml" <<EOF
+upstream_dns_servers:
+  - 8.8.8.8
+  - 1.1.1.1
+EOF
+    cat >"$target/group_vars/k8s_cluster/akash.yml" <<EOF
+container_manager: containerd
+kubelet_custom_flags:
+  - "--root-dir=${KUBELET_DIR:-/var/lib/kubelet}"
+containerd_storage_dir: "${CONTAINERD_DIR:-/var/lib/containerd}"
+EOF
+    if [[ -n ${TLS_SAN:-} ]]; then
+        printf 'supplementary_addresses_in_ssl_keys:\n  - %s\n' "$TLS_SAN" >>"$target/group_vars/k8s_cluster/akash.yml"
+    fi
+}
+
+install_tailscale_before_cluster() {
+    $INSTALL_TAILSCALE || return 0
+    run_project_playbook tailscale
+    TLS_SAN=$(ssh_to_node 0 "sudo tailscale ip -4 | head -n 1")
+    require_nonempty "Tailscale IPv4 address" "$TLS_SAN"
+    write_group_vars
+    info "Using $TLS_SAN as the Kubernetes API TLS SAN."
+}
+
+install_cluster() {
+    case "$CLUSTER_MODE" in
+        kubespray)
+            setup_kubespray_environment
+            configure_kubespray_inventory
+            ANSIBLE_CONFIG="$KUBESPRAY_DIR/ansible.cfg" "$KUBESPRAY_DIR/venv/bin/ansible-playbook" \
+                --inventory "$KUBESPRAY_DIR/inventory/akash/inventory.ini" "$KUBESPRAY_DIR/cluster.yml" --become
+            ;;
+        k3s) run_project_playbook k3s ;;
+        existing) info "Using the existing Kubernetes cluster." ;;
+    esac
+
+    if [[ $CLUSTER_MODE == kubespray ]] && ! $INSTALL_ROOK; then
+        run_project_playbook local-path
+    fi
+}
+
+verify_cluster() {
+    ssh_to_node 0 "sudo kubectl get nodes"
+}
+
+run_selected_roles() {
+    $INSTALL_OS && run_project_playbook os
+    $INSTALL_GPU && run_project_playbook gpu
+    $INSTALL_ROOK && run_project_playbook rook-ceph
+    $INSTALL_PROVIDER && run_project_playbook provider
+}
+
+collect_cluster_paths() {
+    if [[ $CLUSTER_MODE == kubespray ]]; then
+        KUBELET_DIR=$(ask "Kubelet data directory" "/var/lib/kubelet")
+        CONTAINERD_DIR=$(ask "Containerd data directory" "/var/lib/containerd")
+    elif [[ $CLUSTER_MODE == k3s ]]; then
+        KUBELET_DIR=/var/lib/kubelet
+        K3S_DATA_DIR=$(ask "K3s data directory" "/var/lib/rancher/k3s")
+    else
+        KUBELET_DIR=/var/lib/kubelet
+        if $INSTALL_ROOK; then
+            local detected_kubelet_dir
+            # shellcheck disable=SC2016 # The process fields expand on the remote node.
+            detected_kubelet_dir=$(ssh_to_node 0 'ps -eo args= | awk '\''
+                /[k]ubelet/ {
+                    for (i = 1; i <= NF; i++) {
+                        if ($i ~ /^--root-dir=/) { sub(/^--root-dir=/, "", $i); print $i; exit }
+                        if ($i == "--root-dir" && (i + 1) <= NF) { print $(i + 1); exit }
+                    }
+                }
+            '\''' 2>/dev/null || true)
+            [[ -n $detected_kubelet_dir ]] && KUBELET_DIR=$detected_kubelet_dir
+        fi
+    fi
+}
+
+main() {
+    display_welcome
+    ui_pause "Begin configuration"
+    if ! $CONFIG_ONLY; then require_root_linux; fi
+    select_components
+    collect_nodes
+    if ! $CONFIG_ONLY; then
+        install_system_prerequisites
+    fi
+    configure_ssh_access
+    collect_node_networking
+    detect_kubernetes_node_names
+    collect_cluster_paths
+    collect_gpu_config
+    collect_tailscale_config
+    collect_storage_config
+    if ! $CONFIG_ONLY; then setup_project_environment; fi
+    collect_provider_config
+    review_configuration
+    write_inventory
+
+    if $CONFIG_ONLY; then
+        ui_screen "COMPLETE" "Configuration generated" \
+            "No packages or clusters were changed."
+        ui_key_value "Inventory" "$INVENTORY_FILE"
+        ui_note "Review the generated files carefully; they contain encoded secrets."
+        return
+    fi
+
+    ui_screen "INSTALL" "Building the provider" \
+        "Each phase must become healthy before the next one begins."
+    run_project_playbook preflight --extra-vars ansible_python_interpreter=/usr/bin/python3
+    install_tailscale_before_cluster
+    install_cluster
+    verify_cluster
+    run_selected_roles
+    ui_screen "COMPLETE" "Provider installation finished" \
+        "The selected cluster and provider components completed successfully."
+    ui_key_value "Inventory" "$INVENTORY_FILE"
+    $INSTALL_PROVIDER && ui_key_value "Provider" "https://provider.${DOMAIN}"
+    ui_note "Keep the generated inventory private; it contains encoded credentials."
+}
+
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+    main "$@"
+fi

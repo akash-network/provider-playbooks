@@ -11,9 +11,9 @@
 
 
 - name: Rsyslog fix
-# Refer:
-#https://andrewmemory.wordpress.com/2022/11/26/ubuntu-22-04-logs-not-rotating/
-#https://askubuntu.com/questions/1429612/ubuntu-22-04-logrotate-not-working-after-upgrade-to-ubuntu-22-04/
+  # References:
+  # https://andrewmemory.wordpress.com/2022/11/26/ubuntu-22-04-logs-not-rotating/
+  # https://askubuntu.com/questions/1429612/ubuntu-22-04-logrotate-not-working-after-upgrade-to-ubuntu-22-04/
   block:
     - name: Remove syslog logrotate config
       ansible.builtin.file:

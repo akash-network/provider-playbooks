@@ -1,0 +1,29 @@
+cdi:
+  enabled: true
+  # NRI avoids mutating K3s's generated containerd configuration. The pinned
+  # K3s release embeds a supported containerd 2.2 runtime.
+  nriPluginEnabled: {{ (provider_cluster_mode | default('') == 'k3s') | bool | lower }}
+
+toolkit:
+  env: []
+
+hostPaths:
+  kubeletRootDir: "{{ kubelet_root_dir | default('/var/lib/kubelet') }}"
+
+driver:
+  enabled: true
+  rdma:
+    enabled: false
+    useHostMofed: false
+
+fabricManager:
+  enabled: {{ gpu_operator_fabric_manager_enabled | default(false) | bool | lower }}
+
+migManager:
+  enabled: false
+
+dcgmExporter:
+  enabled: true
+
+nodeStatusExporter:
+  enabled: true

@@ -1,13 +1,12 @@
 ---
-- name: Check if provider vars file exists
-  become: false
-  ansible.builtin.stat:
-    path: /tmp/provider_vars_temp.txt
-  delegate_to: localhost
-  register: provider_vars_file
-
 - name: Check if node has control-plane label
-  ansible.builtin.shell: kubectl get node {{ inventory_hostname }} --no-headers -o custom-columns=LABELS:.metadata.labels | grep -q 'node-role.kubernetes.io/control-plane\|node-role.kubernetes.io/master'
+  ansible.builtin.shell: >-
+    set -o pipefail &&
+    kubectl get node {{ kubernetes_node_name | default(inventory_hostname) | quote }}
+    --no-headers -o custom-columns=LABELS:.metadata.labels |
+    grep -q 'node-role.kubernetes.io/control-plane\|node-role.kubernetes.io/master'
+  args:
+    executable: /bin/bash
   register: control_plane_check
   failed_when: false
   changed_when: false
@@ -17,61 +16,24 @@
     msg: "This task can only be run on a Kubernetes control plane node"
   when: control_plane_check.rc != 0
 
-- name: Fetch latest provider version from GitHub
-  become: false
-  ansible.builtin.uri:
-    url: https://api.github.com/repos/akash-network/provider/releases/latest
-    method: GET
-    headers:
-      Accept: application/vnd.github.v3+json
-    return_content: yes
-  register: github_release
-  delegate_to: localhost
-
-- name: Set latest provider version
-  ansible.builtin.set_fact:
-    provider_version: "{{ github_release.json.tag_name | replace('v', '') }}"
-  when: github_release.status == 200
-
-- name: Log fetched provider version
+- name: Log pinned provider version
   ansible.builtin.debug:
-    msg: "Fetched latest provider version: {{ provider_version }}"
-  when: github_release.status == 200
+    msg: "Using pinned provider version: {{ provider_version }}"
 
-- name: Check if provider keys are passed as variables
+- name: Load provider keys retrieved by the optional 1Password play
   ansible.builtin.set_fact:
-    provider_keys_passed: "{{ provider_b64_key is defined and provider_b64_keysecret is defined }}"
-
-- name: Fail playbook if provider vars file does not exist
-  ansible.builtin.fail:
-    msg: "The provider_b64_key and provider_b64_keysecret were not found. Please run the op role first or pass the provider_b64_key & provider_b64_keysecret via extra vars or host vars"
-  when: not provider_vars_file.stat.exists and not provider_keys_passed | default(false)
-
-- name: Read provider variables from file
-  become: false
-  ansible.builtin.slurp:
-    src: "/tmp/provider_vars_temp.txt"
-  when: not provider_keys_passed
-  delegate_to: localhost
-  register: provider_vars_file
-
-- name: Set facts from file content
-  ansible.builtin.set_fact:
-    provider_b64_key: "{{ (provider_vars_file['content'] | b64decode).split('\n')[0].split(': ')[1] }}"
-    provider_b64_keysecret: "{{ (provider_vars_file['content'] | b64decode).split('\n')[1].split(': ')[1] }}"
-  when: not provider_keys_passed
+    provider_b64_key: >-
+      {{ provider_b64_key | default(hostvars['localhost'].provider_b64_key | default('')) }}
+    provider_b64_keysecret: >-
+      {{ provider_b64_keysecret | default(hostvars['localhost'].provider_b64_keysecret | default('')) }}
   no_log: true
 
-- name: Debug provider keys
-  ansible.builtin.debug:
-    msg:
-      - "provider_b64_key: {{ provider_b64_key | default('Not defined') }}"
-      - "provider_b64_keysecret: {{ provider_b64_keysecret | default('Not defined') }}"
-  when: not provider_keys_passed
-
-- name: Clean up temporary YAML file
-  become: false
-  ansible.builtin.file:
-    path: "/tmp/provider_vars_temp.txt"
-    state: absent
-  delegate_to: localhost
+- name: Require provider key material
+  ansible.builtin.assert:
+    that:
+      - provider_b64_key | length > 0
+      - provider_b64_keysecret | length > 0
+    fail_msg: >-
+      Provider credentials were not found. Run the op role first or define
+      provider_b64_key and provider_b64_keysecret in protected host variables.
+  no_log: true

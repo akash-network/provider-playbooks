@@ -1,51 +1,185 @@
 ---
-# tasks file for gpu
-- name: Check if node has NVIDIA GPU
-  ansible.builtin.shell: lspci | grep -i nvidia
-  register: gpu_check
+- name: Install GPU discovery prerequisites
+  ansible.builtin.apt:
+    name:
+      - jq
+      - pciutils
+    state: present
+    update_cache: true
+
+- name: Detect NVIDIA hardware
+  ansible.builtin.command: lspci
+  register: pci_devices
   changed_when: false
-  failed_when: false
 
-- name: Set fact for GPU presence
+- name: Record whether this node has an NVIDIA GPU
   ansible.builtin.set_fact:
-    has_gpu: "{{ gpu_check.rc == 0 }}"
+    has_nvidia_gpu: "{{ 'NVIDIA' in (pci_devices.stdout | upper) }}"
 
-- name: Skip GPU tasks if no GPU is present
-  ansible.builtin.debug:
-    msg: "No NVIDIA GPU detected on this node. Skipping GPU tasks."
-  when: not has_gpu
+- name: Detect conflicting host-managed NVIDIA packages
+  ansible.builtin.shell: >-
+    dpkg-query -W -f='${binary:Package}\n' 2>/dev/null |
+    grep -E '^(nvidia-driver|nvidia-headless|cuda-drivers|nvidia-container-toolkit)' || true
+  args:
+    executable: /bin/bash
+  register: host_nvidia_packages
+  changed_when: false
+  when: has_nvidia_gpu | bool
 
-- name: Check current Helm version (if any)
+- name: Require clean GPU nodes for GPU Operator
+  ansible.builtin.assert:
+    that:
+      - host_nvidia_packages.stdout | trim | length == 0
+    fail_msg: >-
+      Host-managed NVIDIA packages conflict with GPU Operator: {{ host_nvidia_packages.stdout_lines | join(', ') }}.
+      Follow the documented GPU Operator migration before rerunning this role.
+  when: has_nvidia_gpu | bool
+
+- name: Require at least one NVIDIA GPU node
+  ansible.builtin.assert:
+    that:
+      - >-
+        groups['kube_node']
+        | map('extract', hostvars, 'has_nvidia_gpu')
+        | select('equalto', true)
+        | list
+        | length > 0
+    fail_msg: GPU installation was selected, but no NVIDIA hardware was detected on worker nodes.
+  run_once: true
+
+- name: Check Helm on the first control-plane node
   ansible.builtin.command: helm version --short
-  register: helm_version
+  register: helm_version_result
   failed_when: false
+  changed_when: false
+  delegate_to: "{{ groups['kube_control_plane'][0] }}"
+  run_once: true
 
-- name: Download Helm install script
+- name: Download the Helm installer
   ansible.builtin.get_url:
-    url: https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+    url: "https://raw.githubusercontent.com/helm/helm/{{ helm_install_version }}/scripts/{{ helm_install_script }}"
     dest: /tmp/get_helm.sh
     mode: '0755'
+  delegate_to: "{{ groups['kube_control_plane'][0] }}"
+  run_once: true
 
-- name: Run Helm install script for v3.17.3
-  environment:
-    HELM_INSTALL_VERSION: "v3.17.3"
+- name: Install pinned Helm
   ansible.builtin.command: /tmp/get_helm.sh
-  when: helm_version.stdout is not defined or 'v3.17.3' not in helm_version.stdout
+  environment:
+    DESIRED_VERSION: "{{ helm_install_version }}"
+  when: helm_install_version not in (helm_version_result.stdout | default(''))
+  delegate_to: "{{ groups['kube_control_plane'][0] }}"
+  run_once: true
 
-- name: Include GPU tasks only if GPU is present
-  ansible.builtin.include_tasks: apt_update.yml
-  when: has_gpu
+- name: Verify pinned Helm version
+  ansible.builtin.command: helm version --short
+  register: installed_helm_version
+  changed_when: false
+  failed_when: helm_install_version not in installed_helm_version.stdout
+  delegate_to: "{{ groups['kube_control_plane'][0] }}"
+  run_once: true
 
-- name: Include NVIDIA update tasks only if GPU is present
-  ansible.builtin.include_tasks: nvidia_update.yml
-  when: has_gpu
+- name: Add NVIDIA Helm repository
+  kubernetes.core.helm_repository:
+    name: nvidia
+    repo_url: https://helm.ngc.nvidia.com/nvidia
+    state: present
+  delegate_to: "{{ groups['kube_control_plane'][0] }}"
+  run_once: true
 
-- name: Include container toolkit tasks only if GPU is present
-  ansible.builtin.include_tasks: nvidia_ctoolkit.yml
-  when: has_gpu
+- name: Detect legacy NVIDIA device-plugin release
+  ansible.builtin.command: helm status nvdp --namespace nvidia-device-plugin
+  register: legacy_nvdp_release
+  failed_when: false
+  changed_when: false
+  delegate_to: "{{ groups['kube_control_plane'][0] }}"
+  run_once: true
 
-- name: Include NVIDIA device plugin tasks only if GPU is present
-  ansible.builtin.include_tasks: nvdp.yml
-  when: has_gpu
+- name: Refuse to install alongside the legacy device plugin
+  ansible.builtin.assert:
+    that:
+      - legacy_nvdp_release.rc != 0
+    fail_msg: >-
+      The legacy nvdp Helm release is still installed. Follow the documented
+      GPU Operator migration, remove that release, and rerun this role.
+  delegate_to: "{{ groups['kube_control_plane'][0] }}"
+  run_once: true
 
+- name: Clear the temporary GPU Operator chart directory
+  ansible.builtin.file:
+    path: /tmp/akash-gpu-operator-chart
+    state: absent
+  changed_when: false
+  delegate_to: "{{ groups['kube_control_plane'][0] }}"
+  run_once: true
 
+- name: Pull the pinned GPU Operator chart for CRDs
+  ansible.builtin.command:
+    argv:
+      - helm
+      - pull
+      - nvidia/gpu-operator
+      - --version
+      - "{{ gpu_operator_version }}"
+      - --untar
+      - --untardir
+      - /tmp/akash-gpu-operator-chart
+  changed_when: false
+  delegate_to: "{{ groups['kube_control_plane'][0] }}"
+  run_once: true
+
+- name: Check whether pinned GPU Operator CRDs differ
+  ansible.builtin.command:
+    argv:
+      - kubectl
+      - diff
+      - --server-side
+      - --force-conflicts
+      - -f
+      - /tmp/akash-gpu-operator-chart/gpu-operator/crds
+      - -f
+      - /tmp/akash-gpu-operator-chart/gpu-operator/charts/node-feature-discovery/crds/nfd-api-crds.yaml
+  register: gpu_operator_crd_diff
+  changed_when: false
+  failed_when: gpu_operator_crd_diff.rc not in [0, 1]
+  delegate_to: "{{ groups['kube_control_plane'][0] }}"
+  run_once: true
+
+- name: Apply pinned GPU Operator CRDs before Helm install or upgrade
+  ansible.builtin.command:
+    argv:
+      - kubectl
+      - apply
+      - --server-side
+      - --force-conflicts
+      - -f
+      - /tmp/akash-gpu-operator-chart/gpu-operator/crds
+      - -f
+      - /tmp/akash-gpu-operator-chart/gpu-operator/charts/node-feature-discovery/crds/nfd-api-crds.yaml
+  register: gpu_operator_crds
+  changed_when: true
+  when: gpu_operator_crd_diff.rc == 1
+  delegate_to: "{{ groups['kube_control_plane'][0] }}"
+  run_once: true
+
+- name: Render GPU Operator values
+  ansible.builtin.template:
+    src: gpu-operator-values.yaml.j2
+    dest: /tmp/gpu-operator-values.yaml
+    mode: '0600'
+  delegate_to: "{{ groups['kube_control_plane'][0] }}"
+  run_once: true
+
+- name: Install NVIDIA GPU Operator
+  kubernetes.core.helm:
+    name: gpu-operator
+    chart_ref: nvidia/gpu-operator
+    chart_version: "{{ gpu_operator_version }}"
+    release_namespace: gpu-operator
+    create_namespace: true
+    values_files:
+      - /tmp/gpu-operator-values.yaml
+    state: present
+    wait: false
+  delegate_to: "{{ groups['kube_control_plane'][0] }}"
+  run_once: true

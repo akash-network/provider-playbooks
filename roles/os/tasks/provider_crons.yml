@@ -34,4 +34,4 @@
       content: |
         PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
         SHELL=/bin/bash
-        */5 * * * * root /usr/local/bin/kill_zombie_parents.sh | logger -t kill_zombie_parents      
+        */5 * * * * root /usr/local/bin/kill_zombie_parents.sh | logger -t kill_zombie_parents

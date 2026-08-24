@@ -1,16 +1,27 @@
-# ==========================================
-# This inventory serves as an example only.
-# Replace <IP> with actual IP addresses.
-# ==========================================
+---
 all:
   hosts:
     node1:
-      ansible_host: <IP>
+      ansible_host: 192.0.2.10
+      internal_ip: 192.0.2.10
+      ansible_user: root
     node2:
-      ansible_host: <IP>
-    node3:
-      ansible_host: <IP>
+      ansible_host: 192.0.2.11
+      internal_ip: 192.0.2.11
+      ansible_user: root
   children:
-    provider:
+    kube_control_plane:
       hosts:
         node1:
+    etcd:
+      children:
+        kube_control_plane:
+    kube_node:
+      hosts:
+        node2:
+    k8s_cluster:
+      children:
+        kube_control_plane:
+        kube_node:
+    calico_rr:
+      hosts: {}

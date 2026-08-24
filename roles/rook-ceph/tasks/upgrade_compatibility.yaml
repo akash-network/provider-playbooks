@@ -1,0 +1,32 @@
+---
+- name: Require a supported Rook operator upgrade path
+  ansible.builtin.assert:
+    that:
+      - rook_ceph_current_operator_version is match('^[0-9]+\.[0-9]+\.[0-9]+$')
+      - >-
+        rook_ceph_current_operator_version is version(
+          rook_ceph_minimum_operator_upgrade_version, '>=', version_type='semver')
+      - >-
+        rook_ceph_current_operator_version is version(
+          rook_ceph_version, '<=', version_type='semver')
+    fail_msg: >-
+      Refusing to reconcile Rook {{ rook_ceph_current_operator_version | default('unknown', true) }}
+      to {{ rook_ceph_version }}. This playbook supports upgrades from
+      {{ rook_ceph_minimum_operator_upgrade_version }} through {{ rook_ceph_version }} only;
+      perform required intermediate upgrades manually, and never use it to downgrade Rook.
+
+- name: Require a reported and supported Ceph version before upgrading
+  ansible.builtin.assert:
+    that:
+      - rook_ceph_current_version is match('^[0-9]+\.[0-9]+\.[0-9]+')
+      - >-
+        rook_ceph_current_version is version(
+          rook_ceph_minimum_upgrade_version, '>=', version_type='semver')
+      - >-
+        rook_ceph_current_version is version(
+          rook_ceph_target_ceph_version, '<=', version_type='semver')
+    fail_msg: >-
+      Refusing to reconcile Ceph {{ rook_ceph_current_version | default('unknown', true) }}
+      to {{ rook_ceph_target_ceph_version }}. Upgrade older clusters with their currently
+      installed Rook release first; newer Ceph versions must never be downgraded by this playbook.
+  when: rook_ceph_upgrade_required | bool or rook_ceph_rotate_daemon_keys | bool

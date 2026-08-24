@@ -1,0 +1,10 @@
+.venv/
+.cache/
+.generated/
+*.retry
+__pycache__/
+*.py[cod]
+
+# Generated inventories and credentials must never be committed.
+host_vars/*.yml
+inventory.local.yml

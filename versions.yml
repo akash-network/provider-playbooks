@@ -1,0 +1,37 @@
+---
+# Central compatibility matrix. Update deliberately alongside docs and tests.
+kubespray_version: v2.31.0
+k3s_install_version: v1.35.3+k3s1
+calico_version: v3.31.5
+local_path_provisioner_version: v0.0.34
+helm_install_version: v4.2.4
+helm_install_script: get-helm-4
+kubernetes_python_version: "32.0.1"
+pyyaml_version: "6.0.2"
+jsonpatch_version: "1.33"
+remote_python_venv: /opt/provider-playbooks/venv
+remote_python_interpreter: /opt/provider-playbooks/venv/bin/python3
+yq_version: v4.47.2
+rook_ceph_version: "1.19.10"
+rook_ceph_minimum_operator_upgrade_version: "1.18.0"
+rook_ceph_image_repository: quay.io/ceph/ceph
+rook_ceph_image_tag: v19.2.6-20260818
+rook_ceph_minimum_upgrade_version: "19.2.0-0"
+rook_ceph_target_ceph_version: "19.2.6-0"
+rook_ceph_secure_key_version: "19.2.6-0"
+ngf_version: "2.6.7"
+cert_manager_chart_version: v1.19.1
+gpu_operator_version: v26.7.0
+gpu_cuda_version: "13.0"
+gpu_database_commit: a127142c5b1c0f797e23f70a9947c6fe8285b24a
+gpu_database_sha256: "0e9081989c0633c5e83ce3457edd2c2901c65ac9c973649635ae5775b5983c9f"
+akt_version: "0.1.1"
+akt_linux_amd64_sha256: "0ba61ba1de49543698a237b58cc316ea68a3b6fbaeb64203aabb65a1695819b1"
+
+# Akash chart pins from akash-network/helm-charts.
+akash_node_chart_version: "18.0.0"
+akash_gateway_chart_version: "1.2.1"
+akash_provider_chart_version: "19.0.2"
+akash_hostname_operator_chart_version: "19.0.2"
+akash_inventory_operator_chart_version: "19.0.2"
+provider_version: "0.16.2"

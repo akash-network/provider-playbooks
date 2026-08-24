@@ -4,10 +4,10 @@
     dest: /etc/apt/apt.conf.d/20auto-upgrades
     content: |
       APT::Periodic::Update-Package-Lists "0";
-      APT::Periodic::Unattended-Upgrade "0";  
+      APT::Periodic::Unattended-Upgrade "0";
 
 - name: Remove unattended-upgrades package
   ansible.builtin.apt:
     name: unattended-upgrades
     state: absent
-    purge: yes
+    purge: true

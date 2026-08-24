@@ -1,0 +1,96 @@
+---
+- name: Validate the persistent storage contract
+  block:
+    - name: Create a storage validation claim
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: PersistentVolumeClaim
+          metadata:
+            generateName: akash-storage-preflight-
+            namespace: default
+            labels:
+              app.kubernetes.io/component: storage-preflight
+              app.kubernetes.io/managed-by: provider-playbooks
+          spec:
+            accessModes:
+              - ReadWriteOnce
+            storageClassName: "{{ storage_class_name }}"
+            resources:
+              requests:
+                storage: 16Mi
+      register: storage_validation_claim_create
+
+    - name: Mount the storage validation claim
+      kubernetes.core.k8s:
+        state: present
+        wait: true
+        wait_condition:
+          type: Ready
+          status: 'True'
+        wait_timeout: 600
+        definition:
+          apiVersion: v1
+          kind: Pod
+          metadata:
+            name: "{{ storage_validation_claim_create.result.metadata.name }}"
+            namespace: default
+            labels:
+              app.kubernetes.io/component: storage-preflight
+              app.kubernetes.io/managed-by: provider-playbooks
+          spec:
+            restartPolicy: Never
+            containers:
+              - name: mount-check
+                image: registry.k8s.io/pause:3.10
+                volumeMounts:
+                  - name: persistent-storage
+                    mountPath: /mnt/akash-storage
+            volumes:
+              - name: persistent-storage
+                persistentVolumeClaim:
+                  claimName: "{{ storage_validation_claim_create.result.metadata.name }}"
+
+    - name: Confirm the storage validation claim is bound
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: PersistentVolumeClaim
+        name: "{{ storage_validation_claim_create.result.metadata.name }}"
+        namespace: default
+      register: storage_validation_claim
+      failed_when: >-
+        storage_validation_claim.resources | length != 1 or
+        storage_validation_claim.resources[0].status.phase | default('') != 'Bound'
+  always:
+    - name: Remove the storage validation pod
+      kubernetes.core.k8s:
+        api_version: v1
+        kind: Pod
+        name: >-
+          {{ (storage_validation_claim_create | default({})).get('result', {})
+             .get('metadata', {}).get('name', '') }}
+        namespace: default
+        state: absent
+        wait: true
+      when:
+        - storage_validation_claim_create is defined
+        - storage_validation_claim_create.result is defined
+        - storage_validation_claim_create.result.metadata is defined
+        - storage_validation_claim_create.result.metadata.name is defined
+
+    - name: Remove the storage validation claim
+      kubernetes.core.k8s:
+        api_version: v1
+        kind: PersistentVolumeClaim
+        name: >-
+          {{ (storage_validation_claim_create | default({})).get('result', {})
+             .get('metadata', {}).get('name', '') }}
+        namespace: default
+        state: absent
+        wait: true
+      when:
+        - storage_validation_claim_create is defined
+        - storage_validation_claim_create.result is defined
+        - storage_validation_claim_create.result.metadata is defined
+        - storage_validation_claim_create.result.metadata.name is defined

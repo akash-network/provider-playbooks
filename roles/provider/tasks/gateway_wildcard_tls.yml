@@ -33,7 +33,7 @@
         definition: "{{ lookup('template', 'certificate-wildcard-gateway.yaml.j2') | from_yaml }}"
 
     - name: Wait for wildcard Certificate to be Ready
-      ansible.builtin.command: kubectl -n akash-gateway wait certificate/wildcard-https --for=condition=ready --timeout=900s
+      ansible.builtin.command: kubectl -n akash-gateway wait certificate/wildcard-ingress --for=condition=ready --timeout=900s
       changed_when: false
 
     - name: Restart NGINX Gateway Fabric to pick up TLS Secret
@@ -60,7 +60,7 @@
         definition: "{{ lookup('template', 'certificate-wildcard-gateway.yaml.j2') | from_yaml }}"
 
     - name: Wait for wildcard Certificate to be Ready
-      ansible.builtin.command: kubectl -n akash-gateway wait certificate/wildcard-https --for=condition=ready --timeout=900s
+      ansible.builtin.command: kubectl -n akash-gateway wait certificate/wildcard-ingress --for=condition=ready --timeout=900s
       changed_when: false
 
     - name: Restart NGINX Gateway Fabric to pick up TLS Secret

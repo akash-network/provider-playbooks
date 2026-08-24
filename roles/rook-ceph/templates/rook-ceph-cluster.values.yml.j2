@@ -1,4 +1,8 @@
 operatorNamespace: {{ rook_ceph_namespace }}
+clusterName: {{ rook_ceph_cluster_name }}
+cephImage:
+  repository: {{ rook_ceph_image_repository }}
+  tag: {{ rook_ceph_image_tag }}
 
 configOverride: |
   [global]
@@ -8,6 +12,18 @@ configOverride: |
 
 cephClusterSpec:
   dataDirHostPath: "{{ rook_ceph_data_dir | default('/var/lib/rook') }}"
+{% if (rook_ceph_render_daemon_security | default(false) | bool) or
+      (rook_ceph_rotate_daemon_keys | default(false) | bool) %}
+  # Rook 1.19.10/Ceph 19.2.6 closes CVE-2025-30156. Existing clusters
+  # need one daemon-key rotation while Ceph is upgraded. Keep this stanza
+  # on later reconciliations because the CRD makes keyGeneration non-removable.
+  security:
+    cephx:
+      daemon:
+        keyRotationPolicy: KeyGeneration
+        keyGeneration: {{ rook_ceph_daemon_key_generation | default(2) }}
+        keyType: aes256k
+{% endif %}
   resources:
   mon:
     count: {{ mon_count }}
@@ -17,13 +33,15 @@ cephClusterSpec:
   storage:
     useAllNodes: false
     useAllDevices: false
-    deviceFilter: "{{ device_filter }}"
     config:
       osdsPerDevice: "{{ osds_per_device }}"
     nodes:
-{% set nodes = storage_nodes | replace('[', '') | replace(']', '') | replace("'", '') | trim() %}
-{% for node in nodes.split() %}
-    - name: "{{ node }}"
+{% for node in storage_nodes | default([]) %}
+      - name: "{{ node.name }}"
+        devices:
+{% for device in node.devices %}
+          - name: "{{ device.name }}"
+{% endfor %}
 {% endfor %}
 cephBlockPools:
   - name: akash-deployments

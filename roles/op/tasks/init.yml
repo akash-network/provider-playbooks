@@ -4,10 +4,13 @@
     missing_vars: "{{ missing_vars | default([]) + [item.name] }}"
   when: item.var is not defined or item.var | length == 0
   loop:
-    - { name: "vault_name", var: "{{ vault_name | default('') }}" }
-    - { name: "provider_name", var: "{{ provider_name | default('') }}" }
-    - { name: "opconnect_account_name", var: "{{ opconnect_account_name | default('') }}" }
-  
+    - name: vault_name
+      var: "{{ vault_name | default('') }}"
+    - name: provider_name
+      var: "{{ provider_name | default('') }}"
+    - name: opconnect_account_name
+      var: "{{ opconnect_account_name | default('') }}"
+
 - name: Fail if required variables are missing
   ansible.builtin.fail:
     msg: |
@@ -17,7 +20,7 @@
       {% endfor %}
       Please define these variables before proceeding.
   when: missing_vars is defined and missing_vars | length > 0
-  
+
 - name: Success message if all variables are defined
   ansible.builtin.debug:
     msg: "All required variables are properly defined."

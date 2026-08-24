@@ -1,0 +1,34 @@
+---
+# Copy to node1.yml only for manual execution. Never commit the populated file.
+akash1_address: ""
+provider_b64_key: ""
+provider_b64_keysecret: ""
+
+domain: ""
+location_region: "na-us-west"
+organization: ""
+email: ""
+website: ""
+discord_username: ""
+status_page: ""
+country: "US"
+city: "CHI"
+timezone: "utc-6"
+location_type: "datacenter"
+hosting_provider: ""
+cpu_vendor: "amd"
+cpu_arch: "x86-64"
+memory_type: "ddr5ecc"
+network_provider: ""
+network_speed_up: 1000
+network_speed_down: 1000
+
+has_gpu: false
+# When has_gpu is true, use canonical profiles from akash-network/provider-configs:
+# gpu_profiles:
+#   - model: t4
+#     ram: 16Gi
+#     interface: pcie
+# cuda_version: "13.0"
+has_persistent_storage: false
+acme_dns_provider: none

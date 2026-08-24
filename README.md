@@ -1,143 +1,174 @@
 # Akash Provider Playbooks
 
-This repository contains Ansible playbooks for setting up and managing an Akash Provider node.
-- **GPU Support:** Installation of NVIDIA GPU drivers and runtime components.
-- **Networking:** Deployment of Tailscale via custom Ansible playbooks.
-- **Provider:** Deployment of Akash Provider with **Gateway API** (NGINX Gateway Fabric), **cert-manager**, **`akash-gateway`**, and placeholder TLS (see `roles/provider/README.md` for production Let’s Encrypt and DNS).
-- **OS:** Sets up sysctl and cron jobs in the nodes.
-- **rook-ceph** Sets up persistent storage based on rook-ceph. See additional details in roles/rook-ceph/README.md
+Ansible automation for building and operating an Akash provider on Ubuntu 24.04
+LTS x86_64 hosts.
 
-## Prerequisites
+The interactive installer supports three independent cluster modes:
 
-### System Requirements
-- Ansible 2.9+
-- Python 3.6+
-- SSH access to target nodes
-- Root or sudo access on target nodes
-- Ubuntu 24.04 LTS
+- **Kubespray** — downloads the pinned Kubespray release and creates a dedicated
+  Kubespray environment only when this mode is selected.
+- **K3s** — uses this repository's K3s role and project-owned Ansible
+  environment. It does not download or use Kubespray.
+- **Existing cluster** — installs neither Kubernetes distribution and applies
+  only the selected provider roles.
 
-## Required Information
+## Requirements
 
-Before running the setup script, prepare the following information:
+- Ubuntu 24.04 LTS x86_64 on every cluster node
+- Root access on the machine running the installer
+- SSH console or out-of-band access to authorize the installer's public key;
+  password-based SSH is not supported
+- Passwordless sudo for non-root SSH users
+- A domain and DNS control for provider endpoints
+- At least the resources documented in the current Akash provider hardware
+  requirements
 
-1. **Provider Details**
-   - Provider domain name (e.g., provider.example.com)
-   - Provider region (e.g., us-west)
-   - Organization name
-   - Contact email
-   - Organization website
+The installer validates the OS, architecture, CPU, memory, SSH access, and
+cluster access before deploying provider services.
 
-2. **Node Information**
-   - Number of nodes in your cluster
-   - IP addresses for each node
-   - SSH credentials for each node
+During provider configuration, the wizard performs a read-only lookup from the
+first node's public IP to suggest its country, city code, UTC offset, and the
+accepted Akash `location-region`. It also reads CPU and memory metadata from
+that node. Every detected profile is shown for confirmation, and the guided
+fallback remains available when IP geolocation or firmware data is incomplete.
+Location lookup uses multiple providers to tolerate service outages and rate
+limits, and reports the specific failure when automatic detection cannot finish.
 
-3. **Storage Configuration** (if using Rook-Ceph)
-   - Storage device names (e.g., /dev/sdb, /dev/nvme0n1)
-   - Number of OSDs per device
-   - Storage device type (HDD/SSD/NVMe)
-   - Storage node selection
+The reachable SSH address for each node must be entered first. The wizard
+selects an existing local SSH key or generates a dedicated Ed25519 key, displays
+the public key and target users, and waits for the operator to add it to each
+node's `authorized_keys`. It verifies key-only SSH before performing any
+discovery, then detects private and public node addresses over that connection.
+SSH continues to use the entered address; when both networks are available, the
+operator chooses which one Kubernetes uses for inter-node traffic. Private
+addressing is recommended. Public addresses must be directly bound or routed
+to their nodes rather than shared behind NAT.
 
-4. **Wallet Options**
-   - Choose one of:
-     - Create a new wallet (recommended for new providers)
-     - Import an existing wallet key file
-     - Import an existing wallet using mnemonic phrase
-     - Paste existing AKT address and encrypted key (for existing providers)
-       - Note: The key and key secret must be already base64 encoded and encrypted
+## Install
 
-## Installation
-
-1. SSH into your first node (node1) of the cluster:
-```bash
-ssh user@node1-ip-address
-```
-
-2. Clone this repository on node1:
 ```bash
 git clone https://github.com/akash-network/provider-playbooks.git
 cd provider-playbooks
+sudo ./scripts/setup_provider.sh
 ```
 
-3. Run the setup script:
-```bash
-./scripts/setup_provider.sh
-```
+The normal installation creates:
 
-4. Follow the interactive prompts to configure your provider.
+- `.venv/` — pinned Ansible environment used by this repository
+- `.generated/inventory/` — generated inventory and encoded key material; this
+  is the only project runtime directory created by configuration-only mode
+- `.cache/kubespray/` — only when Kubespray is selected
 
-## Playbook Selection
+All three paths are ignored by Git. Generated files containing wallet, DNS, or
+Tailscale credentials are mode `0600`. Base64-encoded credentials are still
+secrets and must not be copied into source control.
 
-The setup script will guide you through selecting which playbooks to run:
-
-- **Kubernetes Installation** (required for new clusters)
-  - **Kubespray**: Production-grade, full-featured Kubernetes installation
-  - **K3s**: Lightweight, single binary Kubernetes distribution (ideal for edge/IoT)
-- **OS**: Basic OS configuration and optimizations
-- **GPU**: NVIDIA driver and container toolkit installation
-- **Provider**: Akash Provider service installation
-- **Tailscale**: VPN setup for secure remote access
-- **Rook-Ceph**: Storage operator installation and configuration
-
-### Tailscale + Kubernetes Integration
-
-When both Tailscale and Kubernetes are selected:
-1. The script automatically installs Tailscale on all nodes first
-2. Retrieves the Tailscale IP address from the control plane node
-3. Adds the Tailscale IP to the Kubernetes API server TLS certificate as a Subject Alternative Name (SAN)
-4. This allows secure access to the Kubernetes API through your Tailscale network
-
-This integration is automatic and requires no additional configuration.
-
-## Manual Execution
-
-If you need to run playbooks manually:
+Use configuration-only mode to inspect generated inventory without installing
+packages or changing hosts:
 
 ```bash
-# Run all playbooks
-ansible-playbook -i inventory/hosts.yaml playbooks.yml
-
-# Run specific playbooks using tags
-ansible-playbook -i inventory/hosts.yaml playbooks.yml -t os,provider,gpu
-
-# Run K3s specific playbooks
-ansible-playbook -i inventory/hosts.yaml playbooks.yml -t k3s
+./scripts/setup_provider.sh --config-only
 ```
 
-## Troubleshooting
+Configuration-only mode does not create `.venv/`, install the isolated Python
+runtime on the remote nodes, download Kubespray, or deploy any selected role.
+The generated inventory is therefore not immediately runnable on a fresh clone;
+complete the local and remote bootstrap under [Manual execution](#manual-execution)
+before invoking a role.
 
-Common issues and solutions:
+## Components
 
-1. **SSH Connection Issues**
-   - Ensure SSH keys are properly set up
-   - Verify network connectivity
-   - Check firewall settings
+- OS tuning and provider maintenance jobs
+- K3s with Calico, or Kubespray Kubernetes
+- NVIDIA GPU Operator for GPU nodes, with PCI-ID detection against a pinned
+  Akash `provider-configs` database to derive model, memory, interface, and
+  Fabric Manager settings automatically
+- Rook-Ceph persistent storage
+- NGINX Gateway Fabric, cert-manager, and Akash Gateway
+- Akash node, provider, hostname operator, and inventory operator
+- Optional Tailscale access with Kubernetes API TLS SAN integration
 
-2. **Kubernetes Installation**
-   - Check system requirements
-   - Verify network configuration
-   - Review kubespray logs (for Kubespray)
-   - Check K3s service status (for K3s)
+GPU nodes must be clean: do not preinstall NVIDIA drivers, CUDA, Container
+Toolkit, or the standalone NVIDIA device plugin. Existing host-driver providers
+must follow the GPU Operator migration guide before using the GPU role.
 
-3. **Provider Service**
-   - Check wallet configuration
-   - Verify network connectivity
-   - Review provider logs
+## Version policy
 
-4. **Storage Issues**
-   - Verify storage devices are clean and available
-   - Check storage node resources
-   - Review Ceph operator logs
-   - Ensure proper network connectivity between storage nodes
-   
-5. **Provider Pod Stuck in Pending (Storage)**
-   - If `akash-provider-0` is stuck waiting for volume binding, the setup script automatically patches the `local-path` StorageClass to use `Immediate` binding mode
-   - This prevents issues in single-node clusters where `WaitForFirstConsumer` causes deadlocks
-   - Manual fix: `kubectl patch storageclass local-path -p '{"volumeBindingMode":"Immediate"}'`
+All compatibility pins live in [`versions.yml`](versions.yml). The installer and
+roles load this file rather than independently selecting `latest` releases.
+Update the matrix together with documentation and validation tests.
+Wallet creation, recovery, address lookup, and export use the unified `akt` CLI;
+the installer verifies the pinned release checksum before installing it. It
+creates a dedicated file-backed `provider` context for Akash mainnet
+non-interactively, avoiding AKT's general-purpose first-run network wizard.
+
+## Manual execution
+
+Run manual commands from the repository root. A completed normal installation
+has already prepared both Python environments, so a role can be rerun directly:
+
+```bash
+source .venv/bin/activate
+ansible-playbook -i .generated/inventory/hosts.ini playbooks.yml --tags provider
+```
+
+After configuration-only mode on a fresh Ubuntu clone, first install the local
+prerequisites that normal mode would have installed, then create the pinned
+Ansible environment and install its collections:
+
+```bash
+sudo apt-get update
+sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y \
+  ca-certificates curl git jq openssh-client openssl \
+  python3 python3-pip python3-venv unzip
+python3 -m venv .venv
+.venv/bin/pip install --requirement requirements.txt
+.venv/bin/ansible-galaxy collection install --requirements-file requirements.yml
+```
+
+The generated inventory selects the isolated remote interpreter, which does not
+exist until the preflight role creates it. Bootstrap every configured node with
+the system Python interpreter before running any other tag:
+
+```bash
+ANSIBLE_CONFIG="$PWD/ansible.cfg" .venv/bin/ansible-playbook \
+  --inventory .generated/inventory/hosts.ini playbooks.yml \
+  --tags preflight \
+  --extra-vars ansible_python_interpreter=/usr/bin/python3
+```
+
+Once preflight succeeds, the generated interpreter setting is usable and the
+selected roles can be run normally. For example, on an existing healthy
+Kubernetes cluster:
+
+```bash
+ANSIBLE_CONFIG="$PWD/ansible.cfg" .venv/bin/ansible-playbook \
+  --inventory .generated/inventory/hosts.ini playbooks.yml \
+  --tags provider
+```
+
+Configuration-only mode does not build a Kubernetes cluster. Run the normal
+installer when Kubespray should create the cluster, or run the `k3s` tag after
+preflight before applying cluster-dependent roles.
+
+Available tags include `preflight`, `tailscale`, `k3s`, `os`, `local-path`,
+`gpu`, `rook-ceph`, and `provider`.
+
+## Validation
+
+```bash
+bash -n scripts/setup_provider.sh scripts/lib/*.sh tests/*.sh
+shellcheck -x scripts/setup_provider.sh scripts/lib/*.sh tests/*.sh
+bash tests/test_installer.sh
+.venv/bin/yamllint .
+.venv/bin/ansible-playbook --syntax-check -i tests/inventory.ini playbooks.yml
+.venv/bin/ansible-playbook -i tests/inventory.ini tests/render_provider.yml
+```
+
+CI runs the same shell and Ansible checks.
 
 ## Support
 
-For support, please:
-- Check the [Akash Documentation](https://docs.akash.network)
-- Join the [Akash Discord](https://discord.gg/akash)
-- Open an issue in this repository
+- [Akash provider documentation](https://akash.network/docs/providers/)
+- [Akash Discord](https://discord.gg/akash)
+- Repository issues for reproducible playbook defects

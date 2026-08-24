@@ -1,0 +1,480 @@
+---
+- name: Validate provider configuration template
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    ansible_remote_tmp: /tmp/provider-playbooks-ansible/remote
+    akash1_address: akash1test
+    provider_b64_key: dGVzdA==
+    provider_b64_keysecret: dGVzdA==
+    domain: example.com
+    node: http://akash-node-1:26657
+    withdrawal_period: 12h
+    chain_id: akashnet-2
+    email: provider@example.com
+    website: https://example.com
+    organization: Example
+    location_region: na-us-midwest
+    tier: community
+    discord_username: example
+    status_page: https://example.com/status
+    country: US
+    city: CHI
+    timezone: utc-6
+    location_type: datacenter
+    hosting_provider: example-colo
+    cpu_vendor: amd
+    cpu_arch: x86-64
+    memory_type: ddr5ecc
+    network_provider: example-isp
+    network_speed_up: 1000
+    network_speed_down: 1000
+    has_persistent_storage: true
+    storage_class_name: beta3
+    has_gpu: true
+    cuda_version: "13.0"
+    gpu_profiles:
+      - model: h100
+        ram: 80Gi
+        interface: sxm
+    price_cpu: 1.60
+    price_memory: 0.30
+    price_hd_ephemeral: 0.02
+    price_hd_pers_hdd: 0.01
+    price_hd_pers_ssd: 0.03
+    price_hd_pers_nvme: 0.10
+    price_endpoint: 0.05
+    price_ip: 5.00
+    rook_ceph_namespace: rook-ceph
+    rook_ceph_cluster_name: rook-ceph
+    rook_ceph_data_dir: /var/lib/rook
+    rook_ceph_existing_cluster: true
+    rook_ceph_daemon_key_generation: 3
+    rook_ceph_rotate_daemon_keys: true
+    rook_ceph_render_daemon_security: true
+    rook_ceph_version: "1.19.10"
+    rook_ceph_image_repository: quay.io/ceph/ceph
+    rook_ceph_image_tag: v19.2.6-20260818
+    rook_ceph_minimum_operator_upgrade_version: "1.18.0"
+    rook_ceph_minimum_upgrade_version: "19.2.0-0"
+    rook_ceph_target_ceph_version: "19.2.6-0"
+    rook_ceph_secure_key_version: "19.2.6-0"
+    rook_ceph_nonblocking_health_warnings:
+      - AUTH_INSECURE_ROTATING_SERVICE_KEY_TYPE
+      - AUTH_INSECURE_CLIENT_KEY_TYPE
+      - AUTH_INSECURE_KEYS_ALLOWED
+      - AUTH_INSECURE_KEYS_CREATABLE
+    rook_ceph_rotation_health_errors:
+      - AUTH_INSECURE_SERVICE_KEY_TYPE
+      - AUTH_INSECURE_SERVICE_TICKETS
+    pool_size: 2
+    min_size: 1
+    mon_count: 1
+    mgr_count: 1
+    osds_per_device: 1
+    expected_osd_count: 3
+    failure_domain: host
+    storage_class: beta3
+    storage_nodes:
+      - name: host-a
+        kubernetes_node_name: provider-a
+        expected_osds: 2
+        devices:
+          - name: /dev/disk/by-id/nvme-one
+          - name: /dev/disk/by-id/nvme-two
+      - name: host-b
+        kubernetes_node_name: provider-b
+        expected_osds: 1
+        devices:
+          - name: /dev/disk/by-id/nvme-three
+    gpu_operator_fabric_manager_enabled: true
+    provider_cluster_mode: k3s
+    kubelet_root_dir: /data/kubelet
+    test_output: /tmp/provider-playbooks-provider.yaml
+    rook_test_output: /tmp/provider-playbooks-rook.yaml
+    rook_operator_test_output: /tmp/provider-playbooks-rook-operator.yaml
+    gpu_test_output: /tmp/provider-playbooks-gpu.yaml
+    gpu_standard_test_output: /tmp/provider-playbooks-gpu-standard.yaml
+  tasks:
+    - name: Render provider configuration
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../roles/provider/templates/provider.yaml.j2"
+        dest: "{{ test_output }}"
+        mode: '0600'
+
+    - name: Load rendered provider configuration
+      ansible.builtin.slurp:
+        src: "{{ test_output }}"
+      register: rendered_provider
+
+    - name: Parse rendered provider configuration
+      ansible.builtin.set_fact:
+        provider_config: "{{ rendered_provider.content | b64decode | from_yaml }}"
+
+    - name: Validate current required attributes
+      ansible.builtin.assert:
+        that:
+          - "'location-region' in attribute_keys"
+          - "'region' not in attribute_keys"
+          - "'capabilities/cpu' in attribute_keys"
+          - "'capabilities/cpu/arch' in attribute_keys"
+          - "'capabilities/memory' in attribute_keys"
+          - "'feat-shm' in attribute_keys"
+          - "'cuda' in attribute_keys"
+          - "'cuda-version' not in attribute_keys"
+          - "'capabilities/gpu/vendor/nvidia/model/h100/ram/80Gi/interface/sxm' in attribute_keys"
+          - "'capabilities/gpu/vendor/nvidia/model/h100/interface/sxm/ram/80Gi' not in attribute_keys"
+      vars:
+        attribute_keys: "{{ provider_config.attributes | map(attribute='key') | list }}"
+
+    - name: Render Rook-Ceph values
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../roles/rook-ceph/templates/rook-ceph-cluster.values.yml.j2"
+        dest: "{{ rook_test_output }}"
+        mode: '0600'
+
+    - name: Load rendered Rook-Ceph values
+      ansible.builtin.slurp:
+        src: "{{ rook_test_output }}"
+      register: rendered_rook
+
+    - name: Validate Rook-Ceph storage-node list
+      ansible.builtin.assert:
+        that:
+          - rook_config.cephClusterSpec.storage.nodes | length == 2
+          - rook_config.cephClusterSpec.storage.nodes[1].name == 'host-b'
+          - rook_config.cephClusterSpec.storage.nodes[0].devices | length == 2
+          - rook_config.cephClusterSpec.storage.nodes[0].devices[0].name == '/dev/disk/by-id/nvme-one'
+          - rook_config.clusterName == 'rook-ceph'
+          - rook_config.cephImage.repository == 'quay.io/ceph/ceph'
+          - rook_config.cephImage.tag == 'v19.2.6-20260818'
+          - rook_config.cephClusterSpec.storage.deviceFilter is not defined
+          - rook_config.cephClusterSpec.security.cephx.daemon.keyRotationPolicy == 'KeyGeneration'
+          - rook_config.cephClusterSpec.security.cephx.daemon.keyGeneration == 3
+          - rook_config.cephClusterSpec.security.cephx.daemon.keyType == 'aes256k'
+      vars:
+        rook_config: "{{ rendered_rook.content | b64decode | from_yaml }}"
+
+    - name: Render Rook-Ceph operator values
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../roles/rook-ceph/templates/rook-ceph-operator.values.yml.j2"
+        dest: "{{ rook_operator_test_output }}"
+        mode: '0600'
+
+    - name: Load rendered Rook-Ceph operator values
+      ansible.builtin.slurp:
+        src: "{{ rook_operator_test_output }}"
+      register: rendered_rook_operator
+
+    - name: Validate custom kubelet root directory
+      ansible.builtin.assert:
+        that:
+          - rook_operator_config.csi.kubeletDirPath == '/data/kubelet'
+      vars:
+        rook_operator_config: "{{ rendered_rook_operator.content | b64decode | from_yaml }}"
+
+    - name: Render GPU Operator values
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../roles/gpu/templates/gpu-operator-values.yaml.j2"
+        dest: "{{ gpu_test_output }}"
+        mode: '0600'
+
+    - name: Load rendered GPU Operator values
+      ansible.builtin.slurp:
+        src: "{{ gpu_test_output }}"
+      register: rendered_gpu
+
+    - name: Validate GPU Operator values
+      ansible.builtin.assert:
+        that:
+          - gpu_config.cdi.enabled | bool
+          - gpu_config.cdi.nriPluginEnabled | bool
+          - gpu_config.operator.defaultRuntime is not defined
+          - gpu_config.toolkit.env | length == 0
+          - gpu_config.hostPaths.kubeletRootDir == '/data/kubelet'
+          - gpu_config.driver.enabled | bool
+          - not (gpu_config.driver.rdma.enabled | bool)
+          - gpu_config.fabricManager.enabled | bool
+      vars:
+        gpu_config: "{{ rendered_gpu.content | b64decode | from_yaml }}"
+
+    - name: Render standard-containerd GPU Operator values
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../roles/gpu/templates/gpu-operator-values.yaml.j2"
+        dest: "{{ gpu_standard_test_output }}"
+        mode: '0600'
+      vars:
+        provider_cluster_mode: kubespray
+
+    - name: Load standard-containerd GPU Operator values
+      ansible.builtin.slurp:
+        src: "{{ gpu_standard_test_output }}"
+      register: rendered_standard_gpu
+
+    - name: Validate standard-containerd GPU Operator values
+      ansible.builtin.assert:
+        that:
+          - standard_gpu_config.cdi.enabled | bool
+          - not (standard_gpu_config.cdi.nriPluginEnabled | bool)
+          - standard_gpu_config.toolkit.env | length == 0
+      vars:
+        standard_gpu_config: "{{ rendered_standard_gpu.content | b64decode | from_yaml }}"
+
+    - name: Load a current secure Ceph upgrade fixture
+      ansible.builtin.set_fact:
+        rook_ceph_existing_operator:
+          stdout: docker.io/rook/ceph:v1.19.10
+        rook_ceph_existing_cluster_data:
+          spec: {}
+          status:
+            phase: Ready
+            ceph:
+              health: HEALTH_OK
+            version:
+              image: quay.io/ceph/ceph:v19.2.6-20260818
+              version: 19.2.6-0
+            cephx:
+              admin: &secure_cephx_key
+                keyCephVersion: 19.2.6-0
+                keyGeneration: 1
+                keyType: aes256k
+              mgr: *secure_cephx_key
+              mon: *secure_cephx_key
+              osd: *secure_cephx_key
+
+    - name: Evaluate the current secure Ceph upgrade fixture
+      ansible.builtin.include_tasks: ../roles/rook-ceph/tasks/cephx_upgrade_state.yaml
+
+    - name: Verify a current cluster does not rotate on rerun
+      ansible.builtin.assert:
+        that:
+          - not (rook_ceph_upgrade_required | bool)
+          - not (rook_ceph_rotate_daemon_keys | bool)
+          - not (rook_ceph_render_daemon_security | bool)
+
+    - name: Load a secure cluster with a client-only warning and operator drift
+      ansible.builtin.set_fact:
+        rook_ceph_existing_operator:
+          stdout: docker.io/rook/ceph:v1.19.9
+        rook_ceph_existing_cluster_data:
+          spec: {}
+          status:
+            phase: Ready
+            ceph:
+              health: HEALTH_WARN
+            version:
+              image: quay.io/ceph/ceph:v19.2.6-20260818
+              version: 19.2.6-0
+            cephx:
+              admin: &warning_secure_cephx_key
+                keyCephVersion: 19.2.6-0
+                keyGeneration: 1
+                keyType: aes256k
+              mgr: *warning_secure_cephx_key
+              mon: *warning_secure_cephx_key
+              osd: *warning_secure_cephx_key
+
+    - name: Evaluate the secure warning and operator-drift fixture
+      ansible.builtin.include_tasks: ../roles/rook-ceph/tasks/cephx_upgrade_state.yaml
+
+    - name: Verify client warnings do not request another daemon rotation
+      ansible.builtin.assert:
+        that:
+          - rook_ceph_upgrade_required | bool
+          - not (rook_ceph_rotate_daemon_keys | bool)
+
+    - name: Load an already-rotated secure Ceph fixture
+      ansible.builtin.set_fact:
+        rook_ceph_existing_operator:
+          stdout: docker.io/rook/ceph:v1.19.10
+        rook_ceph_existing_cluster_data:
+          spec:
+            security:
+              cephx:
+                daemon:
+                  keyRotationPolicy: KeyGeneration
+                  keyGeneration: 3
+                  keyType: aes256k
+          status:
+            phase: Ready
+            ceph:
+              health: HEALTH_OK
+            version:
+              image: quay.io/ceph/ceph:v19.2.6-20260818
+              version: 19.2.6-0
+            cephx:
+              admin: &rotated_cephx_key
+                keyCephVersion: 19.2.6-0
+                keyGeneration: 3
+                keyType: aes256k
+              mgr: *rotated_cephx_key
+              mon: *rotated_cephx_key
+              osd: *rotated_cephx_key
+
+    - name: Evaluate the already-rotated secure Ceph fixture
+      ansible.builtin.include_tasks: ../roles/rook-ceph/tasks/cephx_upgrade_state.yaml
+
+    - name: Verify an already-rotated generation is preserved
+      ansible.builtin.assert:
+        that:
+          - not (rook_ceph_upgrade_required | bool)
+          - not (rook_ceph_rotate_daemon_keys | bool)
+          - rook_ceph_render_daemon_security | bool
+          - rook_ceph_daemon_key_generation | int == 3
+
+    - name: Load a partially-completed CephX rotation fixture
+      ansible.builtin.set_fact:
+        rook_ceph_existing_operator:
+          stdout: docker.io/rook/ceph:v1.19.10
+        rook_ceph_existing_cluster_data:
+          spec:
+            security:
+              cephx:
+                daemon:
+                  keyRotationPolicy: KeyGeneration
+                  keyGeneration: 3
+                  keyType: aes256k
+          status:
+            phase: Ready
+            ceph:
+              health: HEALTH_ERR
+            version:
+              image: quay.io/ceph/ceph:v19.2.6-20260818
+              version: 19.2.6-0
+            cephx:
+              admin: &completed_cephx_key
+                keyCephVersion: 19.2.6-0
+                keyGeneration: 3
+                keyType: aes256k
+              mgr: *completed_cephx_key
+              mon: &pending_cephx_key
+                keyCephVersion: 19.2.6-0
+                keyGeneration: 2
+                keyType: aes
+              osd: *pending_cephx_key
+
+    - name: Evaluate the partially-completed CephX rotation fixture
+      ansible.builtin.include_tasks: ../roles/rook-ceph/tasks/cephx_upgrade_state.yaml
+
+    - name: Verify a partial rotation resumes its configured generation
+      ansible.builtin.assert:
+        that:
+          - not (rook_ceph_upgrade_required | bool)
+          - rook_ceph_rotate_daemon_keys | bool
+          - rook_ceph_pending_configured_generation | bool
+          - rook_ceph_daemon_key_generation | int == 3
+
+    - name: Render already-rotated Rook-Ceph values
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../roles/rook-ceph/templates/rook-ceph-cluster.values.yml.j2"
+        dest: /tmp/provider-playbooks-rook-preserved.yaml
+        mode: '0600'
+
+    - name: Load already-rotated Rook-Ceph values
+      ansible.builtin.slurp:
+        src: /tmp/provider-playbooks-rook-preserved.yaml
+      register: rendered_rook_preserved
+
+    - name: Verify the rendered key generation remains configured
+      ansible.builtin.assert:
+        that:
+          - preserved_rook_config.cephClusterSpec.security.cephx.daemon.keyGeneration == 3
+          - preserved_rook_config.cephClusterSpec.security.cephx.daemon.keyType == 'aes256k'
+      vars:
+        preserved_rook_config: "{{ rendered_rook_preserved.content | b64decode | from_yaml }}"
+
+    - name: Load a current Ceph fixture with legacy AES daemon keys
+      ansible.builtin.set_fact:
+        rook_ceph_existing_operator:
+          stdout: docker.io/rook/ceph:v1.19.10
+        rook_ceph_existing_cluster_data:
+          spec: {}
+          status:
+            phase: Ready
+            ceph:
+              health: HEALTH_OK
+            version:
+              image: quay.io/ceph/ceph:v19.2.6-20260818
+              version: 19.2.6-0
+            cephx:
+              admin: &legacy_aes_cephx_key
+                keyCephVersion: 19.2.6-0
+                keyGeneration: 1
+                keyType: aes
+              mgr: *legacy_aes_cephx_key
+              mon: *legacy_aes_cephx_key
+              osd: *legacy_aes_cephx_key
+
+    - name: Evaluate the current Ceph fixture with legacy AES daemon keys
+      ansible.builtin.include_tasks: ../roles/rook-ceph/tasks/cephx_upgrade_state.yaml
+
+    - name: Verify legacy AES daemon keys request an AES256K rotation
+      ansible.builtin.assert:
+        that:
+          - not (rook_ceph_upgrade_required | bool)
+          - rook_ceph_rotate_daemon_keys | bool
+          - rook_ceph_render_daemon_security | bool
+          - rook_ceph_daemon_key_generation | int == 2
+
+    - name: Load a pre-security-update Ceph fixture
+      ansible.builtin.set_fact:
+        rook_ceph_existing_operator:
+          stdout: docker.io/rook/ceph:v1.18.7
+        rook_ceph_existing_cluster_data:
+          spec: {}
+          status:
+            phase: Ready
+            ceph:
+              health: HEALTH_OK
+            version:
+              image: quay.io/ceph/ceph:v19.2.3
+              version: 19.2.3-0
+
+    - name: Evaluate the pre-security-update Ceph fixture
+      ansible.builtin.include_tasks: ../roles/rook-ceph/tasks/cephx_upgrade_state.yaml
+
+    - name: Verify an old cluster rotates to the next generation
+      ansible.builtin.assert:
+        that:
+          - rook_ceph_upgrade_required | bool
+          - rook_ceph_rotate_daemon_keys | bool
+          - rook_ceph_daemon_key_generation | int == 2
+
+    - name: Load a recovered live-health fixture after a stale warning snapshot
+      ansible.builtin.set_fact:
+        rook_ceph_current_health: HEALTH_WARN
+        rook_ceph_rotate_daemon_keys: false
+        rook_ceph_preupgrade_health_detail:
+          stdout: '{"status":"HEALTH_OK","checks":{}}'
+
+    - name: Accept Ceph recovery between the snapshot and live health query
+      ansible.builtin.include_tasks: ../roles/rook-ceph/tasks/preupgrade_health_policy.yaml
+
+    - name: Verify unsupported Rook and Ceph versions are rejected
+      vars:
+        compatibility_cases:
+          - name: skipped Rook minor
+            operator: 1.17.9
+            ceph: 19.2.3-0
+          - name: Rook downgrade
+            operator: 1.20.0
+            ceph: 19.2.6-0
+          - name: Ceph downgrade
+            operator: 1.19.10
+            ceph: 19.2.7-0
+      block:
+        - name: Initialize compatibility rejection results
+          ansible.builtin.set_fact:
+            compatibility_rejections: []
+
+        - name: Exercise incompatible upgrade fixtures
+          ansible.builtin.include_tasks: incompatible_upgrade_fixture.yml
+          loop: "{{ compatibility_cases }}"
+          loop_control:
+            loop_var: compatibility_case
+
+        - name: Confirm every incompatible upgrade fixture was rejected
+          ansible.builtin.assert:
+            that:
+              - compatibility_rejections | length == compatibility_cases | length

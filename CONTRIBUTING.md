@@ -1,5 +1,20 @@
 # Contributing to Akash Provider Ansible Playbooks
 
+Before submitting changes, run:
+
+```bash
+bash -n scripts/setup_provider.sh scripts/lib/*.sh tests/*.sh
+shellcheck -x scripts/setup_provider.sh scripts/lib/*.sh tests/*.sh
+bash tests/test_installer.sh
+.venv/bin/yamllint .
+.venv/bin/ansible-playbook --syntax-check -i tests/inventory.ini playbooks.yml
+.venv/bin/ansible-playbook -i tests/inventory.ini tests/render_provider.yml
+```
+
+Keep dependency pins in `versions.yml`, and update tests and documentation in
+the same change. Never commit `.generated/`, `.venv/`, `.cache/`, wallet keys,
+DNS credentials, or Tailscale auth keys.
+
 Thank you for your interest in contributing to the Akash Provider Ansible Playbooks! This document provides guidelines and instructions for contributing to the project.
 
 ## Project Structure
@@ -8,23 +23,24 @@ The repository is organized as follows:
 
 ```
 .
-├── roles/                    # Ansible roles for different components
-│   ├── tailscale/           # Tailscale networking setup
-│   ├── provider/            # Provider-specific configurations
-│   ├── op/                  # 1Password integration
-│   ├── gpu/                 # GPU driver and runtime setup
-│   └── os/                  # sysctl, cron job configurations
-├── host_vars/               # Host-specific variables
-├── playbooks.yml           # Main playbook definitions
-├── inventory.yml           # Inventory configuration
-└── inventory_example.yml   # Example inventory structure
+├── roles/                    # Component roles
+│   ├── gpu/                  # NVIDIA GPU Operator
+│   ├── k3s/                  # K3s and Calico
+│   ├── provider/             # Akash provider stack
+│   ├── rook-ceph/            # Persistent storage
+│   └── tailscale/            # Optional private networking
+├── scripts/                  # Interactive installer and helpers
+├── tests/                    # Installer and template validation
+├── playbooks.yml             # Main tagged plays
+├── inventory_example.yml     # Non-secret inventory example
+└── versions.yml              # Central compatibility pins
 ```
 
 ## Prerequisites
 
 Before contributing, ensure you have:
 
-- Ansible installed (version 2.9 or higher)
+- Python 3.12 and the dependencies from `requirements-dev.txt`
 - Basic understanding of Ansible playbooks and roles
 - Git installed and configured
 - Access to a test environment for validating changes
@@ -119,4 +135,4 @@ Follow these commit message guidelines:
 
 By contributing, you agree that your contributions will be licensed under the same terms as the project's license.
 
-Thank you for contributing to the Akash Provider Ansible Playbooks! 
+Thank you for contributing to the Akash Provider Ansible Playbooks!

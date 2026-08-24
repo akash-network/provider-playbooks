@@ -1,2 +1,2 @@
 csi:
-  kubeletDirPath: "{{ rook_ceph_kubelet_dir_path | default('/var/lib/kubelet') }}"
+  kubeletDirPath: "{{ kubelet_root_dir | default('/var/lib/kubelet') }}"

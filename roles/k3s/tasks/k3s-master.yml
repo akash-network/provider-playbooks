@@ -1,6 +1,6 @@
 - name: Set kubeconfig path
   ansible.builtin.set_fact:
-    kubeconfig_path: "{{ '/' + ansible_user + '/.kube/config' if ansible_user == 'root' else '/home/' + ansible_user + '/.kube/config' }}"
+    kubeconfig_path: /root/.kube/config
 
 - name: Ensure directory exists for scheduler config
   ansible.builtin.file:
@@ -12,7 +12,7 @@
   ansible.builtin.template:
     src: "scheduler-config.yaml"
     dest: "{{ k3s_data_dir }}/server/etc/scheduler-config.yaml"
-    mode: '0644'    
+    mode: '0644'
 
 - name: Ensure directory exists for scheduler credentials
   ansible.builtin.file:
@@ -57,9 +57,9 @@
 - name: Set token as variable
   ansible.builtin.set_fact:
     k3s_token: "{{ k3s_token_b64['content'] | b64decode | trim }}"
-  when: not is_first_master and k3s_token_b64 is defined and k3s_token_b64.content is defined    
+  when: not is_first_master and k3s_token_b64 is defined and k3s_token_b64.content is defined
 
-- name: Show all IPv4 addresses
+- name: Set first control-plane internal address
   ansible.builtin.set_fact:
     master_ip: "{{ hostvars[groups['kube_control_plane'][0]]['internal_ip'] }}"
   when: not is_first_master
@@ -76,7 +76,7 @@
 
 - name: Check token availability before installation
   ansible.builtin.assert:
-    that: 
+    that:
       - "is_first_master or (k3s_token is defined) or (token is defined and token != '')"
     fail_msg: "Token is required for joining additional control plane nodes but none was found"
     success_msg: "Token is available for installation"
@@ -90,6 +90,7 @@
     INSTALL_K3S_EXEC='server {{ k3s_common_args }}
     {{ cluster_init }}
     --node-ip={{ hostvars[inventory_hostname].internal_ip }}
+    {% if external_ip is defined and external_ip != '' %}--node-external-ip={{ external_ip }}{% endif %}
     --node-name={{ inventory_hostname }}
     {{ tls_san_arg }}
     --kubelet-arg=root-dir={{ kubelet_root_dir }}
@@ -114,6 +115,7 @@
   register: k3s_install
   changed_when: k3s_install.rc == 0
   notify: restart k3s
+  no_log: true
 
 - name: Wait for K3s to be ready
   ansible.builtin.wait_for:
