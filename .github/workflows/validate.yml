@@ -1,0 +1,29 @@
+name: Validate
+
+on:
+  pull_request:
+  push:
+
+jobs:
+  static-checks:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install shell tooling
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+      - name: Validate shell
+        run: |
+          bash -n scripts/setup_provider.sh scripts/lib/*.sh tests/*.sh
+          shellcheck -x scripts/setup_provider.sh scripts/lib/*.sh tests/*.sh
+          bash tests/test_installer.sh
+      - name: Install Ansible
+        run: |
+          python3 -m venv .venv
+          .venv/bin/pip install -r requirements-dev.txt
+          .venv/bin/ansible-galaxy collection install -r requirements.yml
+      - name: Validate YAML
+        run: .venv/bin/yamllint .
+      - name: Validate Ansible syntax
+        run: |
+          .venv/bin/ansible-playbook --syntax-check -i tests/inventory.ini playbooks.yml
+          .venv/bin/ansible-playbook -i tests/inventory.ini tests/render_provider.yml

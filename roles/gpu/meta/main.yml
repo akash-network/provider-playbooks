@@ -1,9 +1,8 @@
-dependencies:
-  - role: common
+dependencies: []
 
 galaxy_info:
   author: Vignesh V, Andrey Arapov
-  description: Ansible role to configure Nvidia drives.
+  description: Ansible role to install NVIDIA GPU Operator.
   company: Overclock
   license: Apache-2.0
   min_ansible_version: 2.15

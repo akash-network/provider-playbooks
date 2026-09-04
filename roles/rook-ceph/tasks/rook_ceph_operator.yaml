@@ -1,9 +1,5 @@
 ---
 # Tasks for deploying the Rook-Ceph operator
-- name: Set kubelet directory path
-  ansible.builtin.set_fact:
-    rook_ceph_kubelet_dir_path: "{{ kubelet_dir_path | default('/var/lib/kubelet', true) }}"
-
 - name: Template Rook-Ceph operator Helm values file
   template:
     src: rook-ceph-operator.values.yml.j2
@@ -53,3 +49,53 @@
     - operator.resources[0].status.readyReplicas > 0
   retries: 30
   delay: 10
+
+- name: Find existing Ceph deployments managed by Rook
+  kubernetes.core.k8s_info:
+    api_version: apps/v1
+    kind: Deployment
+    namespace: "{{ rook_ceph_namespace }}"
+    label_selectors:
+      - "rook_cluster={{ rook_ceph_namespace }}"
+  register: rook_ceph_managed_deployments
+  until:
+    - rook_ceph_managed_deployments.resources | default([]) | length > 0
+  retries: 30
+  delay: 5
+  when:
+    - rook_ceph_existing_cluster | bool
+    - rook_ceph_upgrade_required | bool
+
+- name: Wait for existing Ceph deployments to finish the Rook upgrade
+  kubernetes.core.k8s_info:
+    api_version: apps/v1
+    kind: Deployment
+    name: "{{ item.metadata.name }}"
+    namespace: "{{ rook_ceph_namespace }}"
+  register: rook_ceph_managed_deployment
+  until:
+    - rook_ceph_managed_deployment.resources | default([]) | length == 1
+    - >-
+      rook_ceph_managed_deployment_state.get('metadata', {}).get('labels', {})
+      .get('rook-version', '') ==
+      ('v' ~ rook_ceph_version)
+    - >-
+      rook_ceph_managed_deployment_state.get('spec', {}).get('replicas', 0) | int ==
+      rook_ceph_managed_deployment_state.get('status', {}).get('updatedReplicas', 0) | int
+    - >-
+      rook_ceph_managed_deployment_state.get('spec', {}).get('replicas', 0) | int ==
+      rook_ceph_managed_deployment_state.get('status', {}).get('readyReplicas', 0) | int
+    - >-
+      rook_ceph_managed_deployment_state.get('spec', {}).get('replicas', 0) | int ==
+      rook_ceph_managed_deployment_state.get('status', {}).get('availableReplicas', 0) | int
+  retries: 120
+  delay: 10
+  loop: "{{ rook_ceph_managed_deployments.resources | default([]) }}"
+  loop_control:
+    label: "{{ item.metadata.name }}"
+  vars:
+    rook_ceph_managed_deployment_state: >-
+      {{ rook_ceph_managed_deployment.resources | default([]) | first | default({}) }}
+  when:
+    - rook_ceph_existing_cluster | bool
+    - rook_ceph_upgrade_required | bool

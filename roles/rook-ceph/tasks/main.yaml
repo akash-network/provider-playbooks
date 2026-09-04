@@ -7,18 +7,25 @@
   ansible.builtin.command: helm version --short
   register: helm_version
   failed_when: false
+  changed_when: false
 
 - name: Download Helm install script
   ansible.builtin.get_url:
-    url: https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+    url: "https://raw.githubusercontent.com/helm/helm/{{ helm_install_version }}/scripts/{{ helm_install_script }}"
     dest: /tmp/get_helm.sh
     mode: '0755'
 
-- name: Run Helm install script for v3.17.3
+- name: Run Helm install script for "{{ helm_install_version }}"
   environment:
-    HELM_INSTALL_VERSION: "v3.17.3"
+    DESIRED_VERSION: "{{ helm_install_version }}"
   ansible.builtin.command: /tmp/get_helm.sh
-  when: helm_version.stdout is not defined or 'v3.17.3' not in helm_version.stdout
+  when: helm_version.stdout is not defined or helm_install_version not in helm_version.stdout
+
+- name: Verify pinned Helm version
+  ansible.builtin.command: helm version --short
+  register: installed_helm_version
+  changed_when: false
+  failed_when: helm_install_version not in installed_helm_version.stdout
 
 - name: Install Rook-CEPH Operator
   ansible.builtin.import_tasks: rook_ceph_operator.yaml

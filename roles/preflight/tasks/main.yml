@@ -1,0 +1,74 @@
+---
+- name: Install remote runtime prerequisites
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - curl
+      - jq
+      - openssl
+      - python3-venv
+    state: present
+    update_cache: true
+
+- name: Create isolated remote Python environment
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -m
+      - venv
+      - --system-site-packages
+      - "{{ remote_python_venv }}"
+  args:
+    creates: "{{ remote_python_interpreter }}"
+
+- name: Install supported Kubernetes Python dependencies
+  ansible.builtin.pip:
+    name:
+      - "kubernetes=={{ kubernetes_python_version }}"
+      - "PyYAML=={{ pyyaml_version }}"
+      - "jsonpatch=={{ jsonpatch_version }}"
+    virtualenv: "{{ remote_python_venv }}"
+
+- name: Verify the isolated Kubernetes Python client
+  ansible.builtin.command:
+    argv:
+      - "{{ remote_python_interpreter }}"
+      - -c
+      - >-
+        import kubernetes; assert kubernetes.__version__ == '{{ kubernetes_python_version }}';
+        print(kubernetes.__version__)
+  changed_when: false
+
+- name: Require Ubuntu 24.04 x86_64
+  ansible.builtin.assert:
+    that:
+      - ansible_distribution == 'Ubuntu'
+      - ansible_distribution_version is version('24.04', '==')
+      - ansible_architecture == 'x86_64'
+    fail_msg: "{{ inventory_hostname }} must run Ubuntu 24.04 LTS on x86_64."
+
+- name: Set node resource minimums
+  ansible.builtin.set_fact:
+    minimum_cpu: >-
+      {{ 8 if groups['all'] | length == 1 else
+         (4 if inventory_hostname in groups['kube_node'] else 2) }}
+    minimum_memory_mb: >-
+      {{ 15000 if groups['all'] | length == 1 else
+         (7500 if inventory_hostname in groups['kube_node'] else 3800) }}
+
+- name: Validate CPU and memory minimums
+  ansible.builtin.assert:
+    that:
+      - ansible_processor_vcpus | int >= minimum_cpu | int
+      - ansible_memtotal_mb | int >= minimum_memory_mb | int
+    fail_msg: >-
+      {{ inventory_hostname }} has {{ ansible_processor_vcpus }} vCPU and {{ ansible_memtotal_mb }} MiB RAM;
+      this role requires at least {{ minimum_cpu }} vCPU and {{ minimum_memory_mb }} MiB RAM.
+
+- name: Verify required remote commands
+  ansible.builtin.command: "{{ item }}"
+  changed_when: false
+  loop:
+    - python3 --version
+    - curl --version
+    - openssl version

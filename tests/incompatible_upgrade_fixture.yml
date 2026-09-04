@@ -1,0 +1,26 @@
+---
+- name: Load incompatible upgrade fixture for {{ compatibility_case.name }}
+  ansible.builtin.set_fact:
+    rook_ceph_current_operator_version: "{{ compatibility_case.operator }}"
+    rook_ceph_current_version: "{{ compatibility_case.ceph }}"
+    rook_ceph_upgrade_required: true
+    rook_ceph_rotate_daemon_keys: false
+    compatibility_fixture_accepted: false
+
+- name: Evaluate incompatible upgrade fixture for {{ compatibility_case.name }}
+  block:
+    - name: Apply Rook-Ceph compatibility policy
+      ansible.builtin.include_tasks: ../roles/rook-ceph/tasks/upgrade_compatibility.yaml
+
+    - name: Record an incorrectly accepted compatibility fixture
+      ansible.builtin.set_fact:
+        compatibility_fixture_accepted: true
+  rescue:
+    - name: Record the expected compatibility rejection
+      ansible.builtin.set_fact:
+        compatibility_rejections: "{{ compatibility_rejections + [compatibility_case.name] }}"
+
+- name: Fail if the incompatible fixture was accepted
+  ansible.builtin.assert:
+    that:
+      - not (compatibility_fixture_accepted | bool)

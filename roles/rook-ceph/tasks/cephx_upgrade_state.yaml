@@ -1,0 +1,77 @@
+---
+- name: Record existing Ceph health and version state
+  ansible.builtin.set_fact:
+    rook_ceph_current_health: >-
+      {{ rook_ceph_existing_cluster_data.get('status', {}).get('ceph', {}).get('health', '') }}
+    rook_ceph_current_phase: >-
+      {{ rook_ceph_existing_cluster_data.get('status', {}).get('phase', '') }}
+    rook_ceph_current_version: >-
+      {{ rook_ceph_existing_cluster_data.get('status', {}).get('version', {}).get('version', '') }}
+    rook_ceph_current_image: >-
+      {{ rook_ceph_existing_cluster_data.get('status', {}).get('version', {}).get('image', '') }}
+    rook_ceph_current_operator_version: >-
+      {{ rook_ceph_existing_operator.stdout |
+         regex_search('[0-9]+\.[0-9]+\.[0-9]+') | default('', true) }}
+    rook_ceph_current_daemon_security: >-
+      {{ rook_ceph_existing_cluster_data.get('spec', {}).get('security', {}).get('cephx', {})
+         .get('daemon', {}) }}
+    rook_ceph_current_spec_key_generation: >-
+      {{ rook_ceph_existing_cluster_data.get('spec', {}).get('security', {}).get('cephx', {})
+         .get('daemon', {}).get('keyGeneration', 0) | int }}
+    rook_ceph_current_key_generation: >-
+      {{ rook_ceph_existing_cluster_data.get('spec', {}).get('security', {}).get('cephx', {})
+         .get('daemon', {}).get('keyGeneration', 0) | int }}
+    rook_ceph_pending_configured_generation: false
+    rook_ceph_rotate_daemon_keys: false
+
+- name: Audit each daemon-managed CephX key
+  ansible.builtin.set_fact:
+    rook_ceph_current_key_generation: >-
+      {{ [rook_ceph_current_key_generation | int, daemon_key.get('keyGeneration', 0) | int] | max }}
+    rook_ceph_pending_configured_generation: >-
+      {{ rook_ceph_pending_configured_generation | bool or
+         (rook_ceph_current_spec_key_generation | int > 0 and
+          daemon_key.get('keyGeneration', 0) | int < rook_ceph_current_spec_key_generation | int) }}
+    rook_ceph_rotate_daemon_keys: >-
+      {{ rook_ceph_rotate_daemon_keys | bool or
+         daemon_key_version in ['', 'Uninitialized'] or
+         daemon_key_version is version(rook_ceph_secure_key_version, '<', version_type='semver') or
+         daemon_key.get('keyType', '') != 'aes256k' }}
+  vars:
+    cephx_status: "{{ rook_ceph_existing_cluster_data.get('status', {}).get('cephx', {}) }}"
+    daemon_key: "{{ cephx_status.get(item.name, {}) }}"
+    daemon_key_version: "{{ daemon_key.get('keyCephVersion', '') }}"
+  loop:
+    - name: admin
+      required: true
+    - name: mgr
+      required: true
+    - name: mon
+      required: true
+    - name: osd
+      required: true
+    - name: cephExporter
+      required: false
+    - name: crashCollector
+      required: false
+  loop_control:
+    label: "{{ item.name }}"
+  when: item.required | bool or item.name in cephx_status
+
+- name: Determine the required Rook and Ceph upgrade actions
+  ansible.builtin.set_fact:
+    rook_ceph_upgrade_required: >-
+      {{ rook_ceph_current_operator_version != rook_ceph_version or
+         rook_ceph_current_image != (rook_ceph_image_repository ~ ':' ~ rook_ceph_image_tag) }}
+    rook_ceph_daemon_key_generation: >-
+      {{ rook_ceph_current_spec_key_generation | int
+         if rook_ceph_rotate_daemon_keys | bool and
+            rook_ceph_pending_configured_generation | bool
+         else [2, (rook_ceph_current_key_generation | int) + 1] | max
+         if rook_ceph_rotate_daemon_keys | bool
+         else rook_ceph_current_daemon_security.get('keyGeneration', 2) | int }}
+    rook_ceph_daemon_security_configured: >-
+      {{ 'keyGeneration' in rook_ceph_current_daemon_security }}
+    rook_ceph_render_daemon_security: >-
+      {{ rook_ceph_rotate_daemon_keys | bool or
+         'keyGeneration' in rook_ceph_current_daemon_security }}

@@ -46,4 +46,4 @@
 
 - name: Set GPU presence fact
   ansible.builtin.set_fact:
-    has_gpu: "{{ gpu_nodes is defined and gpu_nodes | length > 0 }}" 
+    has_gpu: "{{ gpu_nodes is defined and gpu_nodes | length > 0 }}"

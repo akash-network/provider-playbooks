@@ -1,0 +1,28 @@
+---
+- name: Download pinned local-path provisioner manifest
+  ansible.builtin.get_url:
+    url: >-
+      https://raw.githubusercontent.com/rancher/local-path-provisioner/{{ local_path_provisioner_version }}/deploy/local-path-storage.yaml
+    dest: /tmp/local-path-storage.yaml
+    mode: '0600'
+
+- name: Verify local-path volume binding mode
+  ansible.builtin.command:
+    argv:
+      - grep
+      - -Fx
+      - 'volumeBindingMode: WaitForFirstConsumer'
+      - /tmp/local-path-storage.yaml
+  changed_when: false
+
+- name: Install pinned local-path provisioner
+  ansible.builtin.command:
+    cmd: kubectl apply -f /tmp/local-path-storage.yaml
+  register: local_path_apply
+  changed_when: "'created' in local_path_apply.stdout or 'configured' in local_path_apply.stdout"
+
+- name: Wait for local-path provisioner
+  ansible.builtin.command: >-
+    kubectl -n local-path-storage wait --for=condition=ready pod
+    -l app=local-path-provisioner --timeout=300s
+  changed_when: false

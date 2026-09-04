@@ -2,7 +2,7 @@
 - name: Disable snapd services
   ansible.builtin.systemd:
     name: "{{ item }}"
-    enabled: no
+    enabled: false
     state: stopped
   loop:
     - snapd.service

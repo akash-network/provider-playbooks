@@ -1,5 +1,22 @@
 rook_ceph_namespace: rook-ceph
-rook_ceph_version: "1.18.7"
+rook_ceph_cluster_name: "{{ rook_ceph_namespace }}"
+rook_ceph_version: "1.19.10"
+rook_ceph_minimum_operator_upgrade_version: "1.18.0"
+rook_ceph_image_repository: quay.io/ceph/ceph
+rook_ceph_image_tag: v19.2.6-20260818
+rook_ceph_minimum_upgrade_version: "19.2.0-0"
+rook_ceph_target_ceph_version: "19.2.6-0"
+rook_ceph_secure_key_version: "19.2.6-0"
+rook_ceph_nonblocking_health_warnings:
+  - AUTH_INSECURE_ROTATING_SERVICE_KEY_TYPE
+  - AUTH_INSECURE_CLIENT_KEY_TYPE
+  - AUTH_INSECURE_KEYS_ALLOWED
+  - AUTH_INSECURE_KEYS_CREATABLE
+rook_ceph_rotation_health_errors:
+  - AUTH_INSECURE_SERVICE_KEY_TYPE
+  - AUTH_INSECURE_SERVICE_TICKETS
+helm_install_version: v4.2.4
+helm_install_script: get-helm-4
 
 # Ceph cluster configuration
 pool_size: 3
@@ -7,24 +24,22 @@ min_size: 2
 mon_count: 3
 mgr_count: 2
 
-# Storage configuration (these will be overridden by setup_provider.sh)
-device_filter: "sd*"
+# Storage configuration (overridden by setup_provider.sh with explicit devices)
 device_type: "ssd"
 osds_per_device: 1
+expected_osd_count: 0
 failure_domain: "host"
 storage_class: "beta2"
 zfs_for_ephemeral: "false"
 
 # Directory paths
-# Kubelet directory path - must match kubelet's --root-dir configuration
-# Leave empty to use default (/var/lib/kubelet)
-# Set to /data/kubelet if using custom kubelet root dir
-kubelet_dir_path: ""
+# Must match kubelet's --root-dir configuration.
+kubelet_root_dir: "/var/lib/kubelet"
 
 # Ceph data directory path - where Ceph monitor and manager data is stored
 # Default: /var/lib/rook
 # If using custom mount (e.g., /data), set to /data/rook
 rook_ceph_data_dir: "/var/lib/rook"
 
-# Node configuration (will be set by setup_provider.sh)
+# Node and explicit device configuration (set by setup_provider.sh)
 storage_nodes: []

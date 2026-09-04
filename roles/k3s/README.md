@@ -1,48 +1,24 @@
-#### K3s Ansible Role
-This guide provides details on how to use the K3s Ansible role to install and configure a K3s Kubernetes cluster with control plane and worker nodes.
+# K3s role
 
-#### Running the playbooks
-##### For control plane nodes:
+Installs the pinned K3s release with Calico and no Kubespray dependency.
+
+| Variable | Default |
+| --- | --- |
+| `k3s_install_version` | `v1.35.3+k3s1` |
+| `k3s_cluster_cidr` | `10.42.0.0/16` |
+| `disable_components` | `traefik,network-policy` |
+| `k3s_flannel_backend` | `none` |
+| `kubelet_root_dir` | `/var/lib/kubelet` |
+| `k3s_data_dir` | `/var/lib/rancher/k3s` |
+| `calico_version` | `v3.31.5` |
+
+The setup script writes a distinct `internal_ip` for every node. Nodes in
+`kube_control_plane` run the server tasks once; nodes in `kube_node` that are not
+control-plane members run the agent tasks once. When Tailscale is enabled, its
+IPv4 address is supplied through `tls_san` before K3s installation.
+
+Run manually with:
+
 ```bash
-ansible-playbook -i inventory.yml playbook.yml -t k3s -e 'host=control_plane'
+ansible-playbook -i .generated/inventory/hosts.ini playbooks.yml --tags k3s
 ```
-##### For worker nodes:
-```bash
-ansible-playbook -i inventory.yml playbook.yml -t k3s -e 'host=workers'
-```
-
-
-#### Configuration Variables
-| Variable                  | Description                                    | Required | Default                 |
-|---------------------------|------------------------------------------------|----------|-------------------------|
-| `k3s_install_version`     | Exact K3s release (`INSTALL_K3S_VERSION`)      | No       | v1.35.3+k3s1            |
-| `k3s_cluster_cidr`        | Calico CIDR                                    | No       | 10.42.0.0/16            |
-| `disable_components`      | K3s components to disable                      | No       | traefik                 |
-| `k3s_flannel_backend`     | Flannel backend to use                         | No       | none                    |
-| `kubelet_root_dir`        | Directory for kubelet data                     | No       | /data/kubelet           |
-| `k3s_data_dir`            | Directory for K3s data                         | No       | /data/k3s               |
-| `calico_version`          | Calico CNI version                             | No       | v3.29.3                 |
-| `calico_manifest_url`     | URL for Calico manifest                        | No       | Generated from version  |
-| `scheduler_config_path`   | Path to scheduler configuration                | No       | Generated from data_dir |
-| `tls_san`                 | TLS SAN for the K3s API server                 | No       | First control plane host|
-
-#### TLS SAN Configuration
-The `tls_san` variable allows you to add additional IP addresses or hostnames to the Kubernetes API server TLS certificate. This is useful for accessing the cluster through VPNs (like Tailscale) or load balancers.
-
-When using the `setup_provider.sh` script:
-- If Tailscale is selected, the script automatically installs Tailscale on the control plane node first
-- It retrieves the Tailscale IP address and configures it as the TLS SAN
-- This allows you to access the Kubernetes API server securely through your Tailscale network
-
-You can also manually set a custom TLS SAN by adding it to your host_vars file:
-```yaml
-tls_san: "100.64.0.1"  # Your custom IP or hostname
-```
-
-
-
-
-UUID=b4b63d1a-2833-491c-b84c-d4c1e529a12c /data ext4 defaults 0 2
-UUID=fa6f82eb-9464-4322-abef-a20b7597b44e /data ext4 defaults 0 2
-UUID=e5ea5f8e-95a0-4fdc-bd9c-bdf40ba20cd4 /data ext4 defaults 0 2
-UUID=413d4644-2760-4035-9751-70302246d3fc /data ext4 defaults 0 2

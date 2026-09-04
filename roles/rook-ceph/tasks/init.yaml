@@ -1,6 +1,12 @@
 ---
 - name: Check if node has control-plane label
-  ansible.builtin.shell: kubectl get node {{ inventory_hostname }} --no-headers -o custom-columns=LABELS:.metadata.labels | grep -q 'node-role.kubernetes.io/control-plane\|node-role.kubernetes.io/master'
+  ansible.builtin.shell: >-
+    set -o pipefail &&
+    kubectl get node {{ kubernetes_node_name | default(inventory_hostname) | quote }}
+    --no-headers -o custom-columns=LABELS:.metadata.labels |
+    grep -q 'node-role.kubernetes.io/control-plane\|node-role.kubernetes.io/master'
+  args:
+    executable: /bin/bash
   register: control_plane_check
   failed_when: false
   changed_when: false
@@ -27,10 +33,127 @@
 
 - name: Ensure Kubernetes version is compatible
   ansible.builtin.fail:
-    msg: "Kubernetes version {{ k8s_server_version }} is not compatible with Rook-Ceph (min 1.22.0)"
-  when: k8s_server_version is version('1.22.0', '<', version_type='semver')
+    msg: >-
+      Kubernetes version {{ k8s_server_version }} is not compatible with Rook-Ceph
+      {{ rook_ceph_version }} (supported range: 1.30.x through 1.35.x)
+  when: >-
+    k8s_server_version is version('1.30.0', '<', version_type='semver') or
+    k8s_server_version is version('1.36.0', '>=', version_type='semver')
 
-- name: Install Kubernetes Python module via apt
-  ansible.builtin.apt:
-    name: python3-kubernetes
-    state: present
+- name: Check for an existing managed Ceph cluster
+  ansible.builtin.command:
+    argv:
+      - kubectl
+      - -n
+      - "{{ rook_ceph_namespace }}"
+      - get
+      - cephcluster
+      - "{{ rook_ceph_cluster_name }}"
+      - -o
+      - json
+  register: rook_ceph_existing_cluster_query
+  failed_when: >-
+    rook_ceph_existing_cluster_query.rc != 0 and
+    'not found' not in (rook_ceph_existing_cluster_query.stderr | lower) and
+    'notfound' not in (rook_ceph_existing_cluster_query.stderr | lower) and
+    "doesn't have a resource type" not in (rook_ceph_existing_cluster_query.stderr | lower)
+  changed_when: false
+
+- name: Record whether the Ceph cluster already exists
+  ansible.builtin.set_fact:
+    rook_ceph_existing_cluster: "{{ rook_ceph_existing_cluster_query.rc == 0 }}"
+
+- name: Read the existing Rook operator image
+  ansible.builtin.command:
+    argv:
+      - kubectl
+      - -n
+      - "{{ rook_ceph_namespace }}"
+      - get
+      - deployment
+      - rook-ceph-operator
+      - -o
+      - jsonpath={.spec.template.spec.containers[0].image}
+  register: rook_ceph_existing_operator
+  changed_when: false
+  when: rook_ceph_existing_cluster | bool
+
+- name: Parse the existing Ceph cluster status
+  ansible.builtin.set_fact:
+    rook_ceph_existing_cluster_data: "{{ rook_ceph_existing_cluster_query.stdout | from_json }}"
+  when: rook_ceph_existing_cluster | bool
+
+- name: Determine existing-cluster upgrade and CephX state
+  ansible.builtin.include_tasks: cephx_upgrade_state.yaml
+  when: rook_ceph_existing_cluster | bool
+
+- name: Validate the supported existing-cluster upgrade path
+  ansible.builtin.include_tasks: upgrade_compatibility.yaml
+  when: rook_ceph_existing_cluster | bool
+
+- name: Initialize fresh-cluster upgrade state
+  ansible.builtin.set_fact:
+    rook_ceph_upgrade_required: false
+    rook_ceph_rotate_daemon_keys: false
+    rook_ceph_daemon_key_generation: 2
+    rook_ceph_daemon_security_configured: false
+    rook_ceph_render_daemon_security: false
+  when: not (rook_ceph_existing_cluster | bool)
+
+- name: Require a reconciled existing Ceph cluster before upgrading
+  ansible.builtin.assert:
+    that:
+      - rook_ceph_current_phase == 'Ready'
+    fail_msg: >-
+      Refusing to upgrade a Ceph cluster whose phase is {{ rook_ceph_current_phase }}.
+      Wait for the CephCluster to return to Ready before rerunning this playbook.
+  when: rook_ceph_upgrade_required | bool or rook_ceph_rotate_daemon_keys | bool
+
+- name: Read non-OK Ceph health details before upgrading
+  ansible.builtin.command:
+    argv:
+      - kubectl
+      - -n
+      - "{{ rook_ceph_namespace }}"
+      - exec
+      - deployment/rook-ceph-tools
+      - --
+      - ceph
+      - health
+      - detail
+      - --format
+      - json
+  register: rook_ceph_preupgrade_health_detail
+  changed_when: false
+  until: rook_ceph_preupgrade_health_detail.rc == 0
+  retries: 12
+  delay: 10
+  when:
+    - rook_ceph_upgrade_required | bool or rook_ceph_rotate_daemon_keys | bool
+    - rook_ceph_current_health != 'HEALTH_OK'
+
+- name: Validate live Ceph health before upgrading
+  ansible.builtin.include_tasks: preupgrade_health_policy.yaml
+  when:
+    - rook_ceph_upgrade_required | bool or rook_ceph_rotate_daemon_keys | bool
+    - rook_ceph_current_health != 'HEALTH_OK'
+
+- name: Read existing Rook-Ceph pods before upgrading
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Pod
+    namespace: "{{ rook_ceph_namespace }}"
+  register: rook_ceph_existing_pods
+  when: rook_ceph_upgrade_required | bool or rook_ceph_rotate_daemon_keys | bool
+
+- name: Require steady Rook-Ceph pods before upgrading
+  ansible.builtin.assert:
+    that:
+      - >-
+        (rook_ceph_existing_pods.resources | map(attribute='status.phase') | list |
+        difference(['Running', 'Succeeded'])) | length == 0
+    fail_msg: >-
+      Refusing to upgrade while Rook-Ceph has pods outside Running or Succeeded:
+      names={{ rook_ceph_existing_pods.resources | map(attribute='metadata.name') | list }},
+      phases={{ rook_ceph_existing_pods.resources | map(attribute='status.phase') | list }}
+  when: rook_ceph_upgrade_required | bool or rook_ceph_rotate_daemon_keys | bool

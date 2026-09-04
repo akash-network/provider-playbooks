@@ -7,7 +7,7 @@
 
 - name: Install the Go-based yq
   ansible.builtin.shell: |
-    wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/local/bin/yq
+    wget https://github.com/mikefarah/yq/releases/download/{{ yq_version }}/yq_linux_amd64 -O /usr/local/bin/yq
     chmod +x /usr/local/bin/yq
   args:
     creates: /usr/local/bin/yq

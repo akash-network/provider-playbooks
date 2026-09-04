@@ -1,0 +1,17 @@
+{
+  "10de": {
+    "name": "nvidia",
+    "devices": {
+      "1eb8": {
+        "name": "t4",
+        "interface": "PCIe",
+        "memory_size": "16Gi"
+      },
+      "2330": {
+        "name": "h100",
+        "interface": "SXM5",
+        "memory_size": "80Gi"
+      }
+    }
+  }
+}

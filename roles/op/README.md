@@ -10,10 +10,10 @@ Important: Testing has only been conducted with the 1Password vault configuratio
 - Generate the provider mnemonic seed and fund the provider account derived off of that seed.
 - Generate the provider key and encrypt it with a new password. This will prompt for the mnemonic.
     ```
-    provider-services keys add default --recover
-    provider-services keys export default
+    akt context keys add default --recover
+    akt context keys export default
     ```
-- Create a key.pem file and Copy the output of the prior command (provider-services keys export default) into the key.pem file
+- Create a key.pem file and copy the output of the prior command (`akt context keys export default`) into the key.pem file
 
 - Encode the provider key & provider key password into base64.
 

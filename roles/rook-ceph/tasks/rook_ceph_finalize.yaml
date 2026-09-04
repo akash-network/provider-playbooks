@@ -16,28 +16,32 @@
   kubernetes.core.k8s:
     kind: StorageClass
     name: "{{ rook_ceph_storage_class }}"
-    state: present
+    state: patched
     definition:
       metadata:
         labels:
           akash.network: "true"
 
-- name: Ensure 'rbd' module is listed in /etc/modules
+- name: Ensure 'rbd' module is listed on every Kubernetes worker
   ansible.builtin.lineinfile:
     path: /etc/modules
     line: rbd
     state: present
+  delegate_to: "{{ item }}"
+  loop: "{{ groups['kube_node'] }}"
+  loop_control:
+    label: "{{ item }}"
+  run_once: true
 
-- name: Load the 'rbd' kernel module
-  community.general.modprobe:
-    name: rbd
-    state: present
-
-- name: Create /root/provider directory for provider configuration
-  ansible.builtin.file:
-    path: /root/provider
-    state: directory
-    mode: '0755'
+- name: Load the 'rbd' kernel module on every Kubernetes worker
+  ansible.builtin.command:
+    cmd: modprobe rbd
+    creates: /sys/module/rbd
+  delegate_to: "{{ item }}"
+  loop: "{{ groups['kube_node'] }}"
+  loop_control:
+    label: "{{ item }}"
+  run_once: true
 
 - name: Extract storage class name from rook-ceph-cluster.values.yml
   ansible.builtin.set_fact:

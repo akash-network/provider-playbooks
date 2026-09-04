@@ -40,7 +40,7 @@
     path: /etc/fstab
     regexp: '^([^#].*\sswap\s.*)'
     replace: '# \1 # Commented out by Ansible'
-    backup: yes
+    backup: true
   when: swap_fstab_configured
   register: fstab_result
   changed_when: fstab_result.changed
@@ -53,7 +53,7 @@
 - name: Report swap disable status
   ansible.builtin.debug:
     msg: "{{ 'Successfully disabled swap' if verify_swaps.stdout_lines | length <= 1 else 'Failed to disable swap completely' }}"
-      
+
 - name: Check root account expiry settings
   ansible.builtin.command: chage -l root
   register: root_settings
@@ -85,7 +85,7 @@
   ansible.builtin.shell: systemctl list-units --type=service | grep -E 'ssh[d]?' | awk '{print $1}' | sed 's/\.service//'
   register: ssh_service_name
   changed_when: false
-      
+
 - name: Reload SSH service
   ansible.builtin.systemd:
     name: "{{ ssh_service_name.stdout }}"
@@ -96,4 +96,4 @@
   ansible.builtin.apt:
     name: chrony
     state: present
-    update_cache: yes
+    update_cache: true

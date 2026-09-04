@@ -1,6 +1,8 @@
 ---
 - name: Tailscale Playbook
-  hosts: kube_node
+  hosts: all
+  vars_files:
+    - versions.yml
   become: true
   become_user: root
   roles:
@@ -8,8 +10,20 @@
   tags:
     - tailscale
 
+- name: Preflight Playbook
+  hosts: all
+  vars_files:
+    - versions.yml
+  become: true
+  roles:
+    - preflight
+  tags:
+    - preflight
+
 - name: k3s Playbook
   hosts: all
+  vars_files:
+    - versions.yml
   become: true
   become_user: root
   serial: "{{ serial_hosts | default(1) }}"
@@ -23,7 +37,9 @@
     - k3s
 
 - name: OS Playbook
-  hosts: kube_node
+  hosts: k8s_cluster
+  vars_files:
+    - versions.yml
   become: true
   become_user: root
   roles:
@@ -31,8 +47,20 @@
   tags:
     - os
 
+- name: Local Path Provisioner Playbook
+  hosts: node1
+  vars_files:
+    - versions.yml
+  become: true
+  roles:
+    - local-path
+  tags:
+    - local-path
+
 - name: Retrieve OP items
   hosts: localhost
+  vars_files:
+    - versions.yml
   roles:
     - op
   tags:
@@ -40,6 +68,8 @@
 
 - name: GPU Playbook
   hosts: kube_node
+  vars_files:
+    - versions.yml
   become: true
   become_user: root
   roles:
@@ -49,6 +79,8 @@
 
 - name: Persistent Storage rook-ceph playbook
   hosts: node1
+  vars_files:
+    - versions.yml
   become: true
   become_user: root
   serial: "{{ serial_hosts | default(1) }}"
@@ -59,6 +91,8 @@
 
 - name: Provider Playbook
   hosts: node1
+  vars_files:
+    - versions.yml
   become: true
   become_user: root
   serial: "{{ serial_hosts | default(1) }}"

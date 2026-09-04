@@ -63,4 +63,4 @@
 
 - name: Apply sysctl settings
   ansible.builtin.command: sysctl -p /etc/sysctl.d/99-custom.conf
-  when: sysctl_config.changed  
+  when: sysctl_config.changed

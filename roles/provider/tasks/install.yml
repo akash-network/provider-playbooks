@@ -31,12 +31,14 @@
   kubernetes.core.helm:
     name: akash-node
     chart_ref: akash/akash-node
+    chart_version: "{{ akash_node_chart_version }}"
     release_namespace: akash-services
+    wait: false
 
 - name: Apply Gateway API experimental CRDs for NGINX Gateway Fabric
   ansible.builtin.shell: |
     set -euo pipefail
-    kubectl kustomize "https://github.com/nginx/nginx-gateway-fabric/config/crd/gateway-api/experimental?ref={{ ngf_git_ref }}" | kubectl apply --server-side -f -
+    kubectl kustomize "https://github.com/nginx/nginx-gateway-fabric/config/crd/gateway-api/experimental?ref=v{{ ngf_version }}" | kubectl apply --server-side -f -
   args:
     executable: /bin/bash
   register: ngf_crd_apply
@@ -53,10 +55,13 @@
   kubernetes.core.helm:
     name: ngf
     chart_ref: oci://ghcr.io/nginx/charts/nginx-gateway-fabric
+    chart_version: "{{ ngf_version }}"
     release_namespace: nginx-gateway
     create_namespace: true
     values_files:
       - /root/provider/nginx-gateway-fabric-values.yaml
+    wait: true
+    wait_timeout: 600s
 
 - name: Install cert-manager
   kubernetes.core.helm:
@@ -68,6 +73,8 @@
     values:
       crds:
         enabled: true
+    wait: true
+    wait_timeout: 600s
 
 - name: Copy price_script.sh to /root/provider/ directory
   ansible.builtin.copy:
@@ -96,6 +103,8 @@
   ansible.builtin.template:
     src: provider.yaml.j2
     dest: /root/provider/provider.yaml
+    mode: '0600'
+  no_log: true
 
 - name: Configure wildcard TLS for Gateway (Let's Encrypt DNS-01 or self-signed placeholder)
   ansible.builtin.import_tasks: gateway_wildcard_tls.yml
@@ -124,16 +133,22 @@
   kubernetes.core.helm:
     name: akash-gateway
     chart_ref: akash/akash-gateway
+    chart_version: "{{ akash_gateway_chart_version }}"
     release_namespace: akash-gateway
     create_namespace: true
     values_files:
       - /root/provider/provider.yaml
+    wait: true
+    wait_timeout: 600s
 
 - name: Install Akash hostname-operator
   kubernetes.core.helm:
     name: akash-hostname-operator
     chart_ref: akash/akash-hostname-operator
+    chart_version: "{{ akash_hostname_operator_chart_version }}"
     release_namespace: akash-services
+    wait: true
+    wait_timeout: 600s
 
 - name: Build inventory operator storage classes list
   ansible.builtin.set_fact:
@@ -144,10 +159,9 @@
     inventory_storage_classes: "{{ inventory_storage_classes + [storage_class_name] }}"
   when: has_persistent_storage | default(false)
 
-- name: Add RAM storage class for GPU workloads
+- name: Add RAM storage class for shared-memory workloads
   ansible.builtin.set_fact:
     inventory_storage_classes: "{{ inventory_storage_classes + ['ram'] }}"
-  when: has_gpu | default(false)
 
 - name: Display inventory operator storage configuration
   ansible.builtin.debug:
@@ -157,10 +171,13 @@
   kubernetes.core.helm:
     name: inventory-operator
     chart_ref: akash/akash-inventory-operator
+    chart_version: "{{ akash_inventory_operator_chart_version }}"
     release_namespace: akash-services
     values:
       inventoryConfig:
         cluster_storage: "{{ inventory_storage_classes }}"
+    wait: true
+    wait_timeout: 600s
 
 - name: Apply Akash CRD from URL
   kubernetes.core.k8s:
@@ -177,8 +194,10 @@
   kubernetes.core.helm:
     name: akash-provider
     chart_ref: akash/provider
+    chart_version: "{{ akash_provider_chart_version }}"
     release_namespace: akash-services
     values:
       bidpricescript: "{{ pricing_script_b64.stdout }}"
     values_files:
       - /root/provider/provider.yaml
+    wait: false

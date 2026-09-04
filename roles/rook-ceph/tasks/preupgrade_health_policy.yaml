@@ -1,0 +1,23 @@
+---
+- name: Permit clean health or only documented CephX findings before upgrading
+  ansible.builtin.assert:
+    that:
+      - >-
+        rook_ceph_live_health_status in ['HEALTH_OK', 'HEALTH_WARN'] or
+        (rook_ceph_rotate_daemon_keys | bool and rook_ceph_live_health_status == 'HEALTH_ERR')
+      - >-
+        (rook_ceph_live_health_status == 'HEALTH_OK' and rook_ceph_live_health_checks | length == 0) or
+        (rook_ceph_live_health_status != 'HEALTH_OK' and rook_ceph_live_health_checks | length > 0)
+      - >-
+        (rook_ceph_live_health_checks.keys() | list |
+        difference(rook_ceph_preupgrade_allowed_health_checks)) | length == 0
+    fail_msg: >-
+      Refusing to resume the CephX rotation because Ceph reports unrelated health findings:
+      {{ rook_ceph_preupgrade_health_detail.stdout }}
+  vars:
+    rook_ceph_live_health: "{{ rook_ceph_preupgrade_health_detail.stdout | from_json }}"
+    rook_ceph_live_health_status: "{{ rook_ceph_live_health.get('status', '') }}"
+    rook_ceph_live_health_checks: "{{ rook_ceph_live_health.get('checks', {}) }}"
+    rook_ceph_preupgrade_allowed_health_checks: >-
+      {{ rook_ceph_nonblocking_health_warnings +
+         (rook_ceph_rotation_health_errors if rook_ceph_rotate_daemon_keys | bool else []) }}

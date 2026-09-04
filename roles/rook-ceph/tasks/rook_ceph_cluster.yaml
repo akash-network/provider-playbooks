@@ -5,9 +5,10 @@
     mode: '0755'
 
 - name: Copy rook-ceph values file to remote host
-  template:
+  ansible.builtin.template:
     src: "rook-ceph-cluster.values.yml.j2"
     dest: "/root/rook-ceph/rook-ceph-cluster.values.yml"
+    mode: '0600'
 
 - name: Install Rook-Ceph Cluster via Helm
   kubernetes.core.helm:
@@ -18,3 +19,244 @@
     values_files:
       - /root/rook-ceph/rook-ceph-cluster.values.yml
     state: present
+    wait: true
+    wait_timeout: 1200s
+
+- name: Wait for the Ceph cluster resource to be ready
+  kubernetes.core.k8s_info:
+    api_version: ceph.rook.io/v1
+    kind: CephCluster
+    name: "{{ rook_ceph_cluster_name }}"
+    namespace: "{{ rook_ceph_namespace }}"
+  register: rook_ceph_cluster
+  until:
+    - >-
+      (rook_ceph_cluster.resources | default([]) | first | default({})).get('status', {}).get('phase', '')
+      == 'Ready'
+  retries: 120
+  delay: 10
+
+- name: Wait for the requested CephX daemon-key rotation
+  kubernetes.core.k8s_info:
+    api_version: ceph.rook.io/v1
+    kind: CephCluster
+    name: "{{ rook_ceph_cluster_name }}"
+    namespace: "{{ rook_ceph_namespace }}"
+  register: rook_ceph_rotation_state
+  until:
+    - rook_ceph_rotation_state.resources | default([]) | length == 1
+    - >-
+      rook_ceph_rotation_status.get('admin', {}).get('keyGeneration', 0) | int ==
+      rook_ceph_daemon_key_generation | int
+    - rook_ceph_rotation_status.get('admin', {}).get('keyType', '') == 'aes256k'
+    - >-
+      rook_ceph_rotation_status.get('admin', {}).get('keyCephVersion', '') not in ['', 'Uninitialized'] and
+      rook_ceph_rotation_status.get('admin', {}).get('keyCephVersion', '') is
+      version(rook_ceph_secure_key_version, '>=', version_type='semver')
+    - >-
+      rook_ceph_rotation_status.get('mgr', {}).get('keyGeneration', 0) | int ==
+      rook_ceph_daemon_key_generation | int
+    - rook_ceph_rotation_status.get('mgr', {}).get('keyType', '') == 'aes256k'
+    - >-
+      rook_ceph_rotation_status.get('mgr', {}).get('keyCephVersion', '') not in ['', 'Uninitialized'] and
+      rook_ceph_rotation_status.get('mgr', {}).get('keyCephVersion', '') is
+      version(rook_ceph_secure_key_version, '>=', version_type='semver')
+    - >-
+      rook_ceph_rotation_status.get('mon', {}).get('keyGeneration', 0) | int ==
+      rook_ceph_daemon_key_generation | int
+    - rook_ceph_rotation_status.get('mon', {}).get('keyType', '') == 'aes256k'
+    - >-
+      rook_ceph_rotation_status.get('mon', {}).get('keyCephVersion', '') not in ['', 'Uninitialized'] and
+      rook_ceph_rotation_status.get('mon', {}).get('keyCephVersion', '') is
+      version(rook_ceph_secure_key_version, '>=', version_type='semver')
+    - >-
+      rook_ceph_rotation_status.get('osd', {}).get('keyGeneration', 0) | int ==
+      rook_ceph_daemon_key_generation | int
+    - rook_ceph_rotation_status.get('osd', {}).get('keyType', '') == 'aes256k'
+    - >-
+      rook_ceph_rotation_status.get('osd', {}).get('keyCephVersion', '') not in ['', 'Uninitialized'] and
+      rook_ceph_rotation_status.get('osd', {}).get('keyCephVersion', '') is
+      version(rook_ceph_secure_key_version, '>=', version_type='semver')
+    - >-
+      'cephExporter' not in rook_ceph_rotation_status or
+      (rook_ceph_rotation_status.get('cephExporter', {}).get('keyGeneration', 0) | int ==
+       rook_ceph_daemon_key_generation | int and
+       rook_ceph_rotation_status.get('cephExporter', {}).get('keyType', '') == 'aes256k' and
+       rook_ceph_rotation_status.get('cephExporter', {}).get('keyCephVersion', '')
+       not in ['', 'Uninitialized'] and
+       rook_ceph_rotation_status.get('cephExporter', {}).get('keyCephVersion', '') is
+       version(rook_ceph_secure_key_version, '>=', version_type='semver'))
+    - >-
+      'crashCollector' not in rook_ceph_rotation_status or
+      (rook_ceph_rotation_status.get('crashCollector', {}).get('keyGeneration', 0) | int ==
+       rook_ceph_daemon_key_generation | int and
+       rook_ceph_rotation_status.get('crashCollector', {}).get('keyType', '') == 'aes256k' and
+       rook_ceph_rotation_status.get('crashCollector', {}).get('keyCephVersion', '')
+       not in ['', 'Uninitialized'] and
+       rook_ceph_rotation_status.get('crashCollector', {}).get('keyCephVersion', '') is
+       version(rook_ceph_secure_key_version, '>=', version_type='semver'))
+  retries: 180
+  delay: 10
+  vars:
+    rook_ceph_rotation_status: >-
+      {{ (rook_ceph_rotation_state.resources | default([]) | first | default({}))
+         .get('status', {}).get('cephx', {}) }}
+  when: rook_ceph_rotate_daemon_keys | bool
+
+- name: Wait for the Ceph toolbox
+  kubernetes.core.k8s_info:
+    api_version: apps/v1
+    kind: Deployment
+    name: rook-ceph-tools
+    namespace: "{{ rook_ceph_namespace }}"
+  register: rook_ceph_toolbox
+  until:
+    - rook_ceph_toolbox.resources | default([]) | length == 1
+    - (rook_ceph_toolbox.resources | first).status.readyReplicas | default(0) | int == 1
+  retries: 60
+  delay: 5
+
+- name: Verify every expected Ceph OSD becomes up and in
+  block:
+    - name: Wait for the expected Ceph OSD count
+      ansible.builtin.shell: |
+        if ! output=$(kubectl -n {{ rook_ceph_namespace | quote }} exec deployment/rook-ceph-tools -- \
+          ceph osd stat --format json 2>/dev/null); then
+          output='{}'
+        fi
+        if [[ -z $output ]]; then output='{}'; fi
+        printf '%s' "$output"
+      args:
+        executable: /bin/bash
+      register: rook_ceph_osd_stat
+      changed_when: false
+      until:
+        - (rook_ceph_osd_stat.stdout | from_json).get('num_osds', 0) | int >= expected_osd_count | int
+        - (rook_ceph_osd_stat.stdout | from_json).get('num_up_osds', 0) | int >= expected_osd_count | int
+        - (rook_ceph_osd_stat.stdout | from_json).get('num_in_osds', 0) | int >= expected_osd_count | int
+      retries: 120
+      delay: 10
+  rescue:
+    - name: Read recent OSD prepare logs
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - -n
+          - "{{ rook_ceph_namespace }}"
+          - logs
+          - -l
+          - app=rook-ceph-osd-prepare
+          - --all-containers=true
+          - --tail=80
+      register: rook_ceph_prepare_logs
+      changed_when: false
+      failed_when: false
+
+    - name: Report rejected or missing Ceph devices
+      ansible.builtin.fail:
+        msg: >-
+          Expected {{ expected_osd_count }} physical-disk OSDs to be up and in, but Ceph reported
+          {{ rook_ceph_osd_stat.stdout | default('{}') }}. Rook may have rejected a selected disk.
+          Recent prepare output: {{ rook_ceph_prepare_logs.stdout | default('No prepare logs were available.') }}
+
+- name: Read running Ceph OSD pods
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Pod
+    namespace: "{{ rook_ceph_namespace }}"
+    label_selectors:
+      - app=rook-ceph-osd
+  register: rook_ceph_osd_pods
+
+- name: Verify OSD distribution across selected nodes
+  ansible.builtin.assert:
+    that:
+      - >-
+        rook_ceph_osd_pods.resources
+        | selectattr('spec.nodeName', 'equalto', item.kubernetes_node_name | default(item.name))
+        | selectattr('status.phase', 'equalto', 'Running')
+        | list | length >= item.expected_osds | int
+    fail_msg: >-
+      Expected {{ item.expected_osds }} running OSDs on Kubernetes node
+      {{ item.kubernetes_node_name | default(item.name) }}, but the
+      selected devices did not all produce OSD pods. Inspect the rook-ceph-osd-prepare logs.
+  loop: "{{ storage_nodes }}"
+  loop_control:
+    label: "{{ item.kubernetes_node_name | default(item.name) }}"
+
+- name: Wait for the Ceph cluster to have no health errors
+  kubernetes.core.k8s_info:
+    api_version: ceph.rook.io/v1
+    kind: CephCluster
+    name: "{{ rook_ceph_cluster_name }}"
+    namespace: "{{ rook_ceph_namespace }}"
+  register: rook_ceph_cluster_health
+  until:
+    - >-
+      (rook_ceph_cluster_health.resources | default([]) | first | default({})).get('status', {}).get('ceph', {}).get('health', '')
+      in ['HEALTH_OK', 'HEALTH_WARN']
+  retries: 120
+  delay: 10
+
+- name: Read Ceph health warnings
+  ansible.builtin.command:
+    argv:
+      - kubectl
+      - -n
+      - "{{ rook_ceph_namespace }}"
+      - exec
+      - deployment/rook-ceph-tools
+      - --
+      - ceph
+      - health
+      - detail
+      - --format
+      - json
+  register: rook_ceph_health_detail
+  changed_when: false
+  until:
+    - rook_ceph_health_detail.rc == 0
+    - >-
+      rook_ceph_health_detail.rc != 0 or
+      (rook_ceph_health_detail.stdout | from_json).status == 'HEALTH_OK' or
+      (((rook_ceph_health_detail.stdout | from_json).checks.keys() | list |
+      difference(rook_ceph_nonblocking_health_warnings)) | length == 0)
+  retries: 120
+  delay: 10
+  when: >-
+    (rook_ceph_cluster_health.resources | first).status.ceph.health == 'HEALTH_WARN'
+
+- name: Refuse unexpected Ceph health warnings
+  ansible.builtin.assert:
+    that:
+      - >-
+        ((rook_ceph_health_detail.stdout | from_json).checks.keys() | list |
+        difference(rook_ceph_nonblocking_health_warnings)) | length == 0
+    fail_msg: >-
+      Ceph reported warnings beyond the documented CephX client-key warnings:
+      {{ rook_ceph_health_detail.stdout }}
+  when:
+    - rook_ceph_health_detail is not skipped
+    - (rook_ceph_health_detail.stdout | default('{}') | from_json).get('status', '') == 'HEALTH_WARN'
+
+- name: Report non-blocking Ceph health warnings
+  ansible.builtin.debug:
+    msg: >-
+      Ceph is operational with documented CephX client-key warnings:
+      {{ (rook_ceph_health_detail.stdout | from_json).checks.keys() | list | join(', ') }}.
+      These can remain on Kubernetes nodes whose kernels do not support AES256K mounts.
+  when:
+    - rook_ceph_health_detail is not skipped
+    - (rook_ceph_health_detail.stdout | default('{}') | from_json).get('status', '') == 'HEALTH_WARN'
+
+- name: Wait for the configured storage class
+  kubernetes.core.k8s_info:
+    api_version: storage.k8s.io/v1
+    kind: StorageClass
+    name: "{{ storage_class }}"
+  register: rook_storage_class
+  until:
+    - rook_storage_class.resources is defined
+    - rook_storage_class.resources | length == 1
+  retries: 60
+  delay: 5

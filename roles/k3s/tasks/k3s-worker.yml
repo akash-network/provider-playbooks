@@ -15,15 +15,15 @@
     src: "{{ k3s_data_dir }}/server/token"
   register: k3s_token_b64
   delegate_to: "{{ groups['kube_control_plane'][0] }}"  # Runs on first master node
-  run_once: true                           # Only needs to run once  
+  run_once: true                           # Only needs to run once
 
 - name: Set token as variable
   ansible.builtin.set_fact:
     k3s_token: "{{ k3s_token_b64['content'] | b64decode | trim }}"
 
-- name: Show all IPv4 addresses
+- name: Set first control-plane internal address
   ansible.builtin.set_fact:
-    master_ip: "{{ hostvars[groups['kube_control_plane'][0]]['ansible_host'] }}"
+    master_ip: "{{ hostvars[groups['kube_control_plane'][0]]['internal_ip'] }}"
 
 - name: Verify required variables are set
   ansible.builtin.fail:
@@ -32,7 +32,7 @@
 
 - name: Debug node configuration settings
   ansible.builtin.debug:
-    msg: 
+    msg:
       - "Debug: nodefs_dir = {{ kubelet_root_dir | default('') }}"
       - "Debug: imagefs_dir = {{ k3s_data_dir | default('') }}"
 
@@ -43,12 +43,13 @@
     K3S_URL=https://{{ master_ip }}:6443 \
     K3S_TOKEN={{ k3s_token }} \
     K3S_DATA_DIR="{{ k3s_data_dir }}" \
-    K3S_KUBELET_ARG="--root-dir={{ kubelet_root_dir }}" \
-    INSTALL_K3S_EXEC="agent --node-name={{ inventory_hostname }}" \
+    INSTALL_K3S_EXEC="agent --node-name={{ inventory_hostname }} --node-ip={{ internal_ip }} {% if external_ip is defined and external_ip != '' %}--node-external-ip={{ external_ip }}{% endif %} --kubelet-arg=root-dir={{ kubelet_root_dir }}" \
     sh -
   args:
     creates: /usr/local/bin/k3s
-  register: k3s_install_result    
+  register: k3s_install_result
+  changed_when: k3s_install_result.rc == 0
+  no_log: true
 
 - name: Verify K3s agent is running
   ansible.builtin.service:

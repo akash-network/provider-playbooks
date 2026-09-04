@@ -1,5 +1,4 @@
-dependencies:
-  - role: common
+dependencies: []
 
 galaxy_info:
   author: Vignesh V, Andrey Arapov

@@ -3,7 +3,7 @@
   ansible.builtin.copy:
     src: /etc/rancher/k3s/k3s.yaml
     dest: "{{ kubeconfig_path }}"
-    remote_src: yes
+    remote_src: true
     owner: "{{ ansible_user }}"
     group: "{{ ansible_user }}"
     mode: '0600'
@@ -18,7 +18,7 @@
 
 - ansible.builtin.debug:
     var: coredns_cm
-  
+
 - name: Notify waiting for CoreDNS ConfigMap
   ansible.builtin.debug:
     msg: "Waiting for the coredns configmap resource..."
@@ -55,7 +55,7 @@
               import /etc/coredns/custom/*.override
           }
           import /etc/coredns/custom/*.server
-  
+
 - name: Confirm CoreDNS configuration patched
   ansible.builtin.debug:
     msg: "CoreDNS configuration patched."

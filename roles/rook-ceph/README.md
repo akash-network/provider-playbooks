@@ -1,156 +1,59 @@
-# Rook-Ceph Role
+# Rook-Ceph role
 
-This role deploys Rook-Ceph for persistent storage on Akash providers following the official Akash documentation.
+Installs pinned Rook-Ceph charts and creates one Akash-labelled RBD storage
+class. The setup wizard maps device types to the documented classes:
 
-**Documentation:** https://akash.network/docs/providers/setup-and-installation/kubespray/persistent-storage/
+- HDD: `beta1`
+- SSD: `beta2`
+- NVMe: `beta3` (default)
 
-## What This Role Does
+The wizard inspects every configured node over the already-validated SSH
+connection. It excludes removable/read-only disks, disks smaller than 5 GiB,
+and disks with partitions, mounts, swap, holders, LVM membership, or recognized
+filesystem/RAID/Ceph signatures. Discovery is read-only and never wipes a disk.
+Arbitrary unformatted data cannot be detected, so the operator must still
+confirm that every selected disk is dedicated to Ceph.
 
-1. **Installs Rook-Ceph Operator** (v1.18.7)
-2. **Deploys Ceph Cluster** with your storage configuration
-3. **Creates Storage Class** (beta1/beta2/beta3)
-4. **Labels Storage Class** with `akash.network=true` for Akash detection
-5. **Creates /root/provider directory** for provider configuration
+The generated inventory records exact devices per Kubernetes node and requires
+stable `/dev/disk/by-id` identities; devices that expose only volatile kernel
+names such as `/dev/sdb` are not selectable. Broad device filters are not used.
+Kubernetes metadata names are retained for API checks, while each node's
+`kubernetes.io/hostname` label is used for Rook device selection. The wizard
+creates one OSD per physical disk and requires at least two physical disks; two
+OSDs carved from one device are not treated as redundancy.
 
-## Prerequisites
+Topology is recommended in this order:
 
-### Hardware Requirements
+- three or more storage hosts: replica 3 with host failure domains;
+- two storage hosts: replica 2 with host failure domains;
+- one storage host with at least two disks: replica 2 with OSD failure domains
+  and an explicit warning that host loss is not tolerated.
 
-**Minimum Requirements:**
-- 4 SSDs across all nodes, OR
-- 2 NVMe SSDs across all nodes
+Within the best available topology, the wizard prefers a homogeneous media
+tier. If that would reduce host redundancy, it recommends the safe mixed-disk
+layout and advertises the storage class of the slowest selected device.
 
-**Drive Requirements:**
-- Dedicated exclusively to persistent storage
-- Unformatted (no partitions or filesystems)
-- NOT used for OS or ephemeral storage
+`kubelet_root_dir` must match the kubelet `--root-dir`; the setup wizard writes
+one shared value for the cluster installer and Rook CSI configuration.
 
-### Network Requirements
+The role does not depend on or prepare the provider role. It verifies the
+expected up/in OSD count and per-node OSD distribution, waits for the
+`CephCluster` to report `Ready` without `HEALTH_ERR`, then labels the configured
+StorageClass for Akash discovery. Safe `HEALTH_WARN` details are surfaced for
+follow-up. If Rook rejects a disk, the failure includes recent OSD-prepare
+output. The `rbd` kernel module is prepared on every Kubernetes worker.
 
-- **Minimum:** 10 GbE NIC cards for storage nodes
-- **Recommended:** 25 GbE or faster
+Defaults use Rook-Ceph `1.19.10`, compatible with Kubernetes 1.30 through 1.35.
+The version is centralized in `versions.yml`. When upgrading a playbook-managed
+cluster, the generated values request the daemon-key rotation required by Ceph
+19.2.6; non-blocking client-key warnings may remain on kernels older than 7.0.
+Existing-cluster automation accepts only the supported Rook 1.18-to-1.19 upgrade
+path (or 1.19 patch updates) and refuses both Rook and Ceph downgrades.
+Single-host storage requires two separate devices and is not host-HA;
+production storage should use at least three storage hosts.
 
-### Ceph Requirements
-
-For production:
-- **Minimum 3 OSDs** for redundancy
-- **Minimum 2 Ceph managers**
-- **Minimum 3 Ceph monitors**
-- **Minimum 60 GB** disk space at `/var/lib/ceph/`
-
-**OSDs per drive:**
-- HDD: 1 OSD max
-- SSD: 1 OSD max
-- NVMe: 2 OSDs max
-
-## Configuration Variables
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `rook_ceph_namespace` | Namespace for Rook Ceph | `rook-ceph` |
-| `rook_ceph_version` | Rook Ceph version | `1.18.7` |
-| `pool_size` | Number of replicas | `3` |
-| `min_size` | Minimum replicas | `2` |
-| `mon_count` | Ceph monitor count | `3` |
-| `mgr_count` | Ceph manager count | `2` |
-| `device_filter` | Device filter (e.g., `sd*`, `nvme*`) | `sd*` |
-| `device_type` | Device type: `hdd`, `ssd`, or `nvme` | `ssd` |
-| `osds_per_device` | OSDs per device (1 for HDD/SSD, 2 for NVMe) | `1` |
-| `failure_domain` | Failure domain (`host` or `osd`) | `host` |
-| `storage_class` | Storage class name (`beta1`, `beta2`, or `beta3`) | `beta2` |
-| `kubelet_dir_path` | Kubelet root directory | `/var/lib/kubelet` |
-| `rook_ceph_data_dir` | Ceph data directory | `/var/lib/rook` |
-| `storage_nodes` | List of storage node names | `[]` |
-
-## Storage Class Types
-
-| Class | Description | Device Type | OSDs per Device |
-|-------|-------------|-------------|-----------------|
-| `beta1` | HDD storage | HDD | 1 |
-| `beta2` | SSD storage | SSD | 1 |
-| `beta3` | NVMe storage | NVMe | 1-2 |
-
-## Directory Paths
-
-### kubelet_dir_path
-- Must match Kubernetes kubelet `--root-dir` configuration
-- Default: `/var/lib/kubelet`
-- Custom: `/data/kubelet` (if configured during K8s setup)
-
-### rook_ceph_data_dir
-- Where Ceph monitor and manager data is stored (NOT OSD data)
-- Default: `/var/lib/rook`
-- Custom: `/data/rook` (if using RAID array at `/data`)
-
-## Usage
-
-The setup script (`scripts/setup_provider.sh`) automatically configures all these variables based on your input. 
-
-### Manual Playbook Execution
+Run manually with:
 
 ```bash
-ansible-playbook -i inventory.yml playbooks.yml -t rook-ceph -v \
-  --extra-vars "kubelet_dir_path=/var/lib/kubelet"
+ansible-playbook -i .generated/inventory/hosts.ini playbooks.yml --tags rook-ceph
 ```
-
-## Verification
-
-After installation, verify:
-
-```bash
-# Check cluster status
-kubectl -n rook-ceph get cephcluster
-
-# Check storage class
-kubectl get storageclass
-
-# Verify label
-kubectl get sc <storage-class> --show-labels
-```
-
-Expected output:
-- Ceph cluster: `PHASE: Ready`, `HEALTH: HEALTH_OK`
-- Storage class labeled with `akash.network=true`
-
-## Troubleshooting
-
-### Check Operator Logs
-```bash
-kubectl -n rook-ceph logs -l app=rook-ceph-operator
-```
-
-### Check Ceph Status
-```bash
-kubectl -n rook-ceph exec -it deploy/rook-ceph-tools -- ceph status
-kubectl -n rook-ceph exec -it deploy/rook-ceph-tools -- ceph osd tree
-```
-
-### Common Issues
-
-**OSDs not starting:**
-- Verify drives are unformatted: `lsblk -f`
-- Check deviceFilter matches your drives
-- Review OSD pod logs
-
-**HEALTH_WARN:**
-- Check `ceph status` for specific warnings
-- Initial warnings during setup are normal
-
-## Integration with Provider Role
-
-The provider role will automatically:
-1. Detect the labeled storage class
-2. Add storage attributes to `provider.yaml`:
-   ```yaml
-   - key: capabilities/storage/1/class
-     value: beta2  # (or beta1/beta3)
-   - key: capabilities/storage/1/persistent
-     value: "true"
-   ```
-3. Configure inventory-operator with the storage class
-
-## Additional Resources
-
-- [Rook Documentation](https://rook.io/docs/rook/latest-release/)
-- [Ceph Documentation](https://docs.ceph.com/)
-- [Akash Persistent Storage Guide](https://akash.network/docs/providers/setup-and-installation/kubespray/persistent-storage/)
