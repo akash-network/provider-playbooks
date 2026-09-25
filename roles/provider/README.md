@@ -2,12 +2,16 @@
 
 Installs the pinned Akash provider stack and its Gateway API dependencies:
 
-- Akash node
+- Optional in-cluster Akash node (disabled by default; the provider targets a public RPC)
 - NGINX Gateway Fabric and experimental Gateway API CRDs
 - cert-manager and wildcard/default TLS secrets
 - Akash Gateway
 - hostname and inventory operators
 - provider CRDs and provider chart
+
+The provider defaults to the public Akash RPC proxy (`node: https://rpc.akt.dev/rpc`), so no in-cluster full node is installed out of the box.
+To run your own node instead, set `install_akash_node: true`.
+That installs the `akash-node` chart and points the provider at the in-cluster service (`http://akash-node-1:26657`) automatically.
 
 Chart and application versions are centralized in `versions.yml`. NGINX
 Gateway Fabric CRDs and its Helm chart always use the same version.

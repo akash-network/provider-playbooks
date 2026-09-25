@@ -32,3 +32,7 @@ has_gpu: false
 # cuda_version: "13.0"
 has_persistent_storage: false
 acme_dns_provider: none
+
+# Chain RPC access. Leave false to use the public rpc-proxy (recommended).
+# Set true to run an in-cluster akash-node and point the provider at it.
+install_akash_node: false

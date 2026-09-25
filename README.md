@@ -85,7 +85,7 @@ before invoking a role.
   Fabric Manager settings automatically
 - Rook-Ceph persistent storage
 - NGINX Gateway Fabric, cert-manager, and Akash Gateway
-- Akash node, provider, hostname operator, and inventory operator
+- Akash provider, hostname operator, and inventory operator (optional in-cluster Akash node)
 - Optional Tailscale access with Kubernetes API TLS SAN integration
 
 GPU nodes must be clean: do not preinstall NVIDIA drivers, CUDA, Container

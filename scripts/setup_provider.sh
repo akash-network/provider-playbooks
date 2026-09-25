@@ -45,6 +45,7 @@ INSTALL_GPU=false
 INSTALL_PROVIDER=true
 INSTALL_TAILSCALE=false
 INSTALL_ROOK=false
+INSTALL_AKASH_NODE=false
 GPU_FABRIC_MANAGER=false
 
 display_welcome() {
@@ -71,6 +72,7 @@ select_components() {
         INSTALL_PROVIDER=true
         INSTALL_TAILSCALE=false
         INSTALL_ROOK=false
+        INSTALL_AKASH_NODE=false
 
         ui_screen "1 / 8" "Choose the Kubernetes foundation" \
             "Only the selected distribution and its dependencies are installed."
@@ -92,6 +94,7 @@ select_components() {
         confirm "Apply provider OS tuning and maintenance jobs?" y || INSTALL_OS=false
         confirm "Configure NVIDIA GPUs with GPU Operator?" n && INSTALL_GPU=true
         confirm "Install the Akash provider stack?" y || INSTALL_PROVIDER=false
+        confirm "Run a local akash-node instead of the public RPC proxy (rpc.akt.dev)?" n && INSTALL_AKASH_NODE=true
         confirm "Connect nodes with Tailscale?" n && INSTALL_TAILSCALE=true
         confirm "Install Rook-Ceph persistent storage?" n && INSTALL_ROOK=true
 
@@ -1322,6 +1325,7 @@ write_provider_vars() {
     printf 'provider_b64_key: %s\n' "$(yaml_quote "$PROVIDER_B64_KEY")"
     printf 'provider_b64_keysecret: %s\n' "$(yaml_quote "$PROVIDER_B64_KEYSECRET")"
     printf 'domain: %s\n' "$(yaml_quote "$DOMAIN")"
+    printf 'install_akash_node: %s\n' "$INSTALL_AKASH_NODE"
     printf 'location_region: %s\n' "$(yaml_quote "$LOCATION_REGION")"
     printf 'organization: %s\n' "$(yaml_quote "$ORGANIZATION")"
     printf 'email: %s\n' "$(yaml_quote "$EMAIL")"
