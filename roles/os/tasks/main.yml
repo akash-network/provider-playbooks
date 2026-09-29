@@ -12,8 +12,8 @@
 - name: Log rotation
   ansible.builtin.import_tasks: journal_cleanup.yml
 
-- name: Provider crons
-  ansible.builtin.import_tasks: provider_crons.yml
+- name: Zombie cleanup cron
+  ansible.builtin.import_tasks: crons.yml
 
 - name: Disable autoupgrades
   ansible.builtin.import_tasks: disable_upgrades.yml

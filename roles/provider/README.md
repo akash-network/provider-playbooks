@@ -8,6 +8,8 @@ Installs the pinned Akash provider stack and its Gateway API dependencies:
 - Akash Gateway
 - hostname and inventory operators
 - provider CRDs and provider chart
+- maintenance cron jobs on the provider node (`akash-delete-failed-pods`,
+  `akash-force-new-replicasets`), which rely on `/root/.kube/config`
 
 The provider defaults to the public Akash RPC proxy (`node: https://rpc.akt.dev/rpc`), so no in-cluster full node is installed out of the box.
 To run your own node instead, set `install_akash_node: true`.
@@ -48,3 +50,5 @@ Run manually with:
 ```bash
 ansible-playbook -i .generated/inventory/hosts.ini playbooks.yml --tags provider
 ```
+
+Reapply only the maintenance cron jobs with `--tags provider-crons`.

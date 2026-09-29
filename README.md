@@ -78,7 +78,7 @@ before invoking a role.
 
 ## Components
 
-- OS tuning and provider maintenance jobs
+- OS tuning and zombie process cleanup
 - K3s with Calico, or Kubespray Kubernetes
 - NVIDIA GPU Operator for GPU nodes, with PCI-ID detection against a pinned
   Akash `provider-configs` database to derive model, memory, interface, and

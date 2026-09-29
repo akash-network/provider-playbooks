@@ -1,16 +1,13 @@
 ---
-- name: Copy scripts to /usr/local/bin and make them executable
+- name: Copy provider maintenance scripts to /usr/local/bin
   ansible.builtin.copy:
-    src: "{{ item }}"
-    dest: "/usr/local/bin/{{ item }}"
+    src: akash-force-new-replicasets.sh
+    dest: /usr/local/bin/akash-force-new-replicasets.sh
     mode: '0755'
     owner: root
     group: root
-  loop:
-    - akash-force-new-replicasets.sh
-    - kill_zombie_parents.sh
 
-- name: Create Kubernetes maintenance cron jobs
+- name: Create provider maintenance cron jobs
   ansible.builtin.copy:
     dest: "/etc/cron.d/{{ item.filename }}"
     content: "{{ item.content }}"
@@ -30,8 +27,3 @@
         SHELL=/bin/bash
         KUBECONFIG=/root/.kube/config
         */5 * * * * root /usr/local/bin/akash-force-new-replicasets.sh
-    - filename: kill_zombie_parents
-      content: |
-        PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
-        SHELL=/bin/bash
-        */5 * * * * root /usr/local/bin/kill_zombie_parents.sh | logger -t kill_zombie_parents
