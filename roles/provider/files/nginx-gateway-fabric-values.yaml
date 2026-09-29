@@ -1,6 +1,9 @@
 # NGINX Gateway Fabric (matches Akash provider docs — Gateway API data plane)
 nginxGateway:
   gatewayClassName: nginx
+  # Provider v0.16.4 uses SnippetsFilters for HTTP options.
+  snippets:
+    enable: true
   gwAPIExperimentalFeatures:
     enable: true
   leaderElection:

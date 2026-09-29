@@ -12,6 +12,12 @@ Installs the pinned Akash provider stack and its Gateway API dependencies:
 Chart and application versions are centralized in `versions.yml`. NGINX
 Gateway Fabric CRDs and its Helm chart always use the same version.
 
+NGINX Gateway Fabric snippets are enabled for the SnippetsFilters used by
+provider v0.16.4 and later. Existing installations must also enable
+`nginxGateway.snippets.enable` on their NGF Helm release before upgrading the
+provider and hostname operator. Updating only the Akash charts does not change
+NGF's configuration.
+
 Persistent storage is opt-in. When `has_persistent_storage` is true, the role
 requires the exact Akash-labelled `storage_class_name` and proves that it can
 provision and mount a temporary PVC before advertising it. The role does not
