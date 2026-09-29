@@ -89,7 +89,7 @@ select_components() {
 
         ui_screen "2 / 8" "Select the provider capabilities" \
             "Defaults are shown in uppercase in each prompt."
-        confirm "Apply provider OS tuning and maintenance jobs?" y || INSTALL_OS=false
+        confirm "Apply OS tuning and zombie process cleanup?" y || INSTALL_OS=false
         confirm "Configure NVIDIA GPUs with GPU Operator?" n && INSTALL_GPU=true
         confirm "Install the Akash provider stack?" y || INSTALL_PROVIDER=false
         confirm "Connect nodes with Tailscale?" n && INSTALL_TAILSCALE=true

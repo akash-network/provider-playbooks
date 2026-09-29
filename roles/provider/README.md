@@ -8,6 +8,8 @@ Installs the pinned Akash provider stack and its Gateway API dependencies:
 - Akash Gateway
 - hostname and inventory operators
 - provider CRDs and provider chart
+- maintenance cron jobs on the provider node (`akash-delete-failed-pods`,
+  `akash-force-new-replicasets`), which rely on `/root/.kube/config`
 
 Chart and application versions are centralized in `versions.yml`. NGINX
 Gateway Fabric CRDs and its Helm chart always use the same version.
@@ -38,3 +40,5 @@ Run manually with:
 ```bash
 ansible-playbook -i .generated/inventory/hosts.ini playbooks.yml --tags provider
 ```
+
+Reapply only the maintenance cron jobs with `--tags provider-crons`.

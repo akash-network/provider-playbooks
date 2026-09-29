@@ -31,7 +31,7 @@ akt_linux_amd64_sha256: "0ba61ba1de49543698a237b58cc316ea68a3b6fbaeb64203aabb65a
 # Akash chart pins from akash-network/helm-charts.
 akash_node_chart_version: "18.0.0"
 akash_gateway_chart_version: "1.2.1"
-akash_provider_chart_version: "19.0.2"
-akash_hostname_operator_chart_version: "19.0.2"
-akash_inventory_operator_chart_version: "19.0.2"
-provider_version: "0.16.2"
+akash_provider_chart_version: "19.0.3"
+akash_hostname_operator_chart_version: "19.0.4"
+akash_inventory_operator_chart_version: "19.0.3"
+provider_version: "0.16.4"
