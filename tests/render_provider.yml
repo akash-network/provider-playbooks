@@ -9,7 +9,7 @@
     provider_b64_key: dGVzdA==
     provider_b64_keysecret: dGVzdA==
     domain: example.com
-    node: http://akash-node-1:26657
+    node: https://rpc.akt.dev/rpc
     withdrawal_period: 12h
     chain_id: akashnet-2
     email: provider@example.com
@@ -478,3 +478,23 @@
           ansible.builtin.assert:
             that:
               - compatibility_rejections | length == compatibility_cases | length
+
+- name: Validate chain RPC endpoint selection
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - ../roles/provider/defaults/main.yml
+  tasks:
+    - name: Default points the provider at the public rpc-proxy
+      ansible.builtin.assert:
+        that:
+          - not (install_akash_node | bool)
+          - node == 'https://rpc.akt.dev/rpc'
+
+    - name: Enabling the local node repoints at the in-cluster akash-node
+      ansible.builtin.assert:
+        that:
+          - node == 'http://akash-node-1:26657'
+      vars:
+        install_akash_node: true

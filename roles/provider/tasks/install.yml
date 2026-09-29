@@ -27,6 +27,24 @@
     state: directory
     mode: '0755'
 
+- name: Detect an existing in-cluster akash-node release
+  kubernetes.core.helm_info:
+    name: akash-node
+    release_namespace: akash-services
+  register: akash_node_release
+
+- name: Require an explicit RPC choice when a local akash-node already exists
+  ansible.builtin.fail:
+    msg: >-
+      An akash-node release exists in akash-services but install_akash_node is
+      false, so this run would repoint the provider at {{ node }} and leave the
+      local node orphaned. Set install_akash_node to true to keep and upgrade
+      the local node, or run 'helm uninstall akash-node -n akash-services' to
+      remove it before re-running to migrate to the public rpc-proxy.
+  when:
+    - akash_node_release.status is defined
+    - not (install_akash_node | bool)
+
 - name: Install Akash node
   kubernetes.core.helm:
     name: akash-node
@@ -34,6 +52,7 @@
     chart_version: "{{ akash_node_chart_version }}"
     release_namespace: akash-services
     wait: false
+  when: install_akash_node | bool
 
 - name: Apply Gateway API experimental CRDs for NGINX Gateway Fabric
   ansible.builtin.shell: |

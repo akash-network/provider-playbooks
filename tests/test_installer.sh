@@ -338,6 +338,7 @@ ACME_DNS_ZONE=test.example
 provider_vars_file="$TEST_ROOT/provider-vars.yml"
 write_provider_vars >"$provider_vars_file"
 grep -q "^acme_dns_provider: 'none'$" "$provider_vars_file"
+grep -q '^install_akash_node: false$' "$provider_vars_file"
 if grep -q '^acme_.*_b64:' "$provider_vars_file"; then
     exit 1
 fi
@@ -579,6 +580,7 @@ fi
 akash_node_task=$(sed -n '/^- name: Install Akash node$/,/^- name: /p' "$REPO_ROOT/roles/provider/tasks/install.yml")
 [[ $akash_node_task == *'wait: false'* ]]
 [[ $akash_node_task != *'wait_timeout:'* ]]
+[[ $akash_node_task == *'when: install_akash_node | bool'* ]]
 akash_provider_task=$(sed -n '/^- name: Install Akash provider using Helm$/,/^- name: /p' "$REPO_ROOT/roles/provider/tasks/install.yml")
 [[ $akash_provider_task == *'wait: false'* ]]
 [[ $akash_provider_task != *'wait_timeout:'* ]]

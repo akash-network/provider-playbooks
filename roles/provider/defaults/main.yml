@@ -17,8 +17,11 @@ provider_version: "0.16.2"
 # acme_dns_provider: none | cloudflare | gcp
 acme_dns_provider: none
 
-# defaults file for provider
-node: "http://akash-node-1:26657"
+# Chain RPC access. By default the provider uses the public rpc-proxy
+# (rpc.akt.dev) and no in-cluster akash-node is installed. Set
+# install_akash_node to true to run your own akash-node and point at it.
+install_akash_node: false
+node: "{{ 'http://akash-node-1:26657' if install_akash_node | bool else 'https://rpc.akt.dev/rpc' }}"
 
 withdrawal_period: "12h"
 chain_id: "akashnet-2"
