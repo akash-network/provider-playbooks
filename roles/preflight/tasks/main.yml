@@ -39,13 +39,13 @@
         print(kubernetes.__version__)
   changed_when: false
 
-- name: Require Ubuntu 24.04 x86_64
+- name: Require Ubuntu 24.04 or 26.04 x86_64
   ansible.builtin.assert:
     that:
       - ansible_distribution == 'Ubuntu'
-      - ansible_distribution_version is version('24.04', '==')
+      - ansible_distribution_version in ['24.04', '26.04']
       - ansible_architecture == 'x86_64'
-    fail_msg: "{{ inventory_hostname }} must run Ubuntu 24.04 LTS on x86_64."
+    fail_msg: "{{ inventory_hostname }} must run Ubuntu 26.04 LTS or 24.04 LTS on x86_64."
 
 - name: Set node resource minimums
   ansible.builtin.set_fact:

@@ -1,5 +1,5 @@
 ---
 helm_install_version: v4.2.4
 helm_install_script: get-helm-4
-gpu_operator_version: v26.7.0
+gpu_operator_version: v26.7.2
 gpu_operator_fabric_manager_enabled: false

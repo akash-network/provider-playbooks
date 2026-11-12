@@ -1,8 +1,8 @@
 ---
 # Central compatibility matrix. Update deliberately alongside docs and tests.
-kubespray_version: v2.31.0
-k3s_install_version: v1.35.3+k3s1
-calico_version: v3.31.5
+kubespray_version: v2.32.0
+k3s_install_version: v1.36.6+k3s1
+calico_version: v3.31.7
 local_path_provisioner_version: v0.0.34
 helm_install_version: v4.2.4
 helm_install_script: get-helm-4
@@ -21,7 +21,7 @@ rook_ceph_target_ceph_version: "19.2.6-0"
 rook_ceph_secure_key_version: "19.2.6-0"
 ngf_version: "2.6.7"
 cert_manager_chart_version: v1.19.1
-gpu_operator_version: v26.7.0
+gpu_operator_version: v26.7.2
 gpu_cuda_version: "13.0"
 gpu_database_commit: a127142c5b1c0f797e23f70a9947c6fe8285b24a
 gpu_database_sha256: "0e9081989c0633c5e83ce3457edd2c2901c65ac9c973649635ae5775b5983c9f"
