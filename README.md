@@ -1,6 +1,6 @@
 # Akash Provider Playbooks
 
-Ansible automation for building and operating an Akash provider on Ubuntu 24.04
+Ansible automation for building and operating an Akash provider on Ubuntu 26.04 or 24.04
 LTS x86_64 hosts.
 
 The interactive installer supports three independent cluster modes:
@@ -14,7 +14,7 @@ The interactive installer supports three independent cluster modes:
 
 ## Requirements
 
-- Ubuntu 24.04 LTS x86_64 on every cluster node
+- Ubuntu 26.04 LTS (recommended) or 24.04 LTS x86_64 on every cluster node
 - Root access on the machine running the installer
 - SSH console or out-of-band access to authorize the installer's public key;
   password-based SSH is not supported

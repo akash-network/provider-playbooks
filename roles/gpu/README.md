@@ -1,6 +1,6 @@
 # GPU role
 
-This role installs NVIDIA GPU Operator on clean Ubuntu 24.04 GPU nodes. It does
+This role installs NVIDIA GPU Operator on clean Ubuntu 26.04 or 24.04 GPU nodes. It does
 not install host drivers, the host Container Toolkit, or the standalone NVIDIA
 device plugin.
 

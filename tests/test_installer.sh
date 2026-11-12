@@ -29,7 +29,7 @@ KUBELET_DIR=/var/lib/kubelet
 [[ $(version_value helm_install_version) == v4.2.4 ]]
 [[ $(version_value helm_install_script) == get-helm-4 ]]
 [[ $(version_value local_path_provisioner_version) == v0.0.34 ]]
-[[ $(version_value gpu_operator_version) == v26.7.0 ]]
+[[ $(version_value gpu_operator_version) == v26.7.2 ]]
 [[ $(version_value gpu_cuda_version) == 13.0 ]]
 [[ $(version_value rook_ceph_version) == 1.19.10 ]]
 [[ $(version_value rook_ceph_image_tag) == v19.2.6-20260818 ]]

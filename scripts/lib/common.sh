@@ -274,5 +274,5 @@ require_root_linux() {
     [[ -r /etc/os-release ]] || die "Cannot identify the operating system."
     # shellcheck disable=SC1091
     source /etc/os-release
-    [[ ${ID:-} == ubuntu && ${VERSION_ID:-} == 24.04 ]] || die "Ubuntu 24.04 LTS is required."
+    [[ ${ID:-} == ubuntu && ${VERSION_ID:-} =~ ^(24|26)\.04$ ]] || die "Ubuntu 26.04 LTS or 24.04 LTS is required."
 }
