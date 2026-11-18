@@ -19,7 +19,7 @@ rook_ceph_image_tag: v19.2.6-20260818
 rook_ceph_minimum_upgrade_version: "19.2.0-0"
 rook_ceph_target_ceph_version: "19.2.6-0"
 rook_ceph_secure_key_version: "19.2.6-0"
-ngf_version: "2.6.7"
+ngf_version: "2.9.0"
 cert_manager_chart_version: v1.19.1
 gpu_operator_version: v26.7.2
 gpu_cuda_version: "13.0"
