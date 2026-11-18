@@ -54,15 +54,28 @@
     wait: false
   when: install_akash_node | bool
 
+# --force-conflicts lets a re-run upgrade CRDs first applied by an older playbook or by hand.
 - name: Apply Gateway API experimental CRDs for NGINX Gateway Fabric
   ansible.builtin.shell: |
     set -euo pipefail
-    kubectl kustomize "https://github.com/nginx/nginx-gateway-fabric/config/crd/gateway-api/experimental?ref=v{{ ngf_version }}" | kubectl apply --server-side -f -
+    kubectl kustomize "https://github.com/nginx/nginx-gateway-fabric/config/crd/gateway-api/experimental?ref=v{{ ngf_version }}" | kubectl apply --server-side --force-conflicts -f -
   args:
     executable: /bin/bash
   register: ngf_crd_apply
   changed_when: ngf_crd_apply.rc == 0
   failed_when: ngf_crd_apply.rc != 0
+
+# Helm installs chart CRDs only on first install and never upgrades them, so apply NGF's own
+# CRDs (gateway.nginx.org) explicitly for the pinned version.
+- name: Apply NGINX Gateway Fabric CRDs
+  ansible.builtin.shell: |
+    set -euo pipefail
+    kubectl apply --server-side --force-conflicts -f "https://raw.githubusercontent.com/nginx/nginx-gateway-fabric/v{{ ngf_version }}/deploy/crds.yaml"
+  args:
+    executable: /bin/bash
+  register: ngf_own_crd_apply
+  changed_when: ngf_own_crd_apply.rc == 0
+  failed_when: ngf_own_crd_apply.rc != 0
 
 - name: Stage NGINX Gateway Fabric Helm values
   ansible.builtin.copy:
